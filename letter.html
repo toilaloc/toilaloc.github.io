@@ -1,0 +1,44 @@
+
+<link rel="stylesheet" href="letter.css"/>
+<body>
+    <div class="card">
+        <div class="imgBox">
+            <div class="bark"></div>
+            <img src="images/lastofus.png">
+        </div>
+        <div class="details">
+            <h4 class="color1">You are my sunshine</h2>
+            <h4 class="color2 margin">(HAPPY BIRTHDAY)</h3>
+            <p>Chào Phương,</p>
+            <p>Xem nào...</p>
+            <p>Bao lâu rồi tớ chưa nói chuyện với cậu nhỉ?</p>
+            <p>Tớ vẫn đang thực hiện điều mà tớ đã nói.</p>
+            <p>Hơi lạc đề, nhưng để chúc mừng tuổi 20 của cậu</p>
+            <p>nên tớ làm website này tặng cậu, hy vọng cậu</p> 
+            <p>thích nó.</p>
+            <p>Chúc may mắn :")</p>
+            <p class="text-right">Và chúc mừng sinh nhật, Phương.</p>
+            <p class="text-right" style="padding-right:3px;">♥ Loc</p>
+        </div>
+    </div>
+    <button id="handle" class="prePage" style="font-family: 'Comfortaa', cursive;position: fixed;margin: 0 auto;bottom:3%;left: 0;right: 10;width: 14em; opacity: 0.8;  background-color: white;border: none;
+color: 1e1934;padding: 5px 15px;text-align: center;text-decoration: none;font-size: 16px;margin: 4px 20px;cursor: pointer; border-radius: 5px;">
+Muốn thổi nến tiếp :3
+</button>
+<button id="end" class="prePage" style="font-family: 'Comfortaa', cursive;position: fixed;margin: 0 auto;bottom:3%;left: 10;right: 0;width: 14em; opacity: 0.8;  background-color: white;border: none;
+color: 1e1934;padding: 5px 15px;text-align: center;text-decoration: none;font-size: 16px;margin: 4px 20px;cursor: pointer; border-radius: 5px;">
+Chưa hết đâu ^^
+</button>
+<script>
+    $("#handle").on('click',function(){
+        $.get('index.html',function(res){
+            $('body').html(res);
+        });
+    });
+    $("#end").on('click',function(){
+        $.get('end.html',function(res){
+            $('body').html(res);
+        });
+    });
+     </script>
+</body>

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Something</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+     <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@500&display=swap" rel="stylesheet">
+</head>
+<body>
+<h1>Make a wish..<br/>.. and blow out the candle</h1>
+<button id="letter" class="hide" style="font-family: 'Comfortaa', cursive;position: fixed;margin: 0 auto;bottom:3%;left: 10;right: 0;width: 10em; opacity: 0.8;  background-color: white;border: none;
+color: 1e1934;padding: 10px 15px 10px;text-align: center;text-decoration: none;font-size: 16px;margin: 4px 20px;cursor: pointer; border-radius: 5px;">
+Còn nữa đấy ^^</button>
+ <div class="glow" id="glow"></div>
+ <div id="candle">
+   <div class="stripe"></div>
+   <div class="stripe"></div>
+   <div class="stripe"></div>
+   <div class="stripe"></div>
+   <div class="stripe"></div>
+   <div id="top">
+     <div class="smoke"></div>
+     <div class="smoke"></div>
+     <div class="smoke"></div>
+     <div id="knot"></div>
+     <div class="burn" id="flame"></div>
+   </div>
+ </div>
+ <script src="app.js"></script>
+ <script>
+$("#letter").on('click',function(){
+    $.get('letter.html',function(res){
+        $('body').html(res);
+    });
+});
+ </script>
+</body>
+</html>
