@@ -5,13 +5,15 @@
 html, body {
     overflow-x: hidden;
 	padding: 0; margin: 0;
+	background:  #1e1934;
 }
 
+
 .bar {
-    margin-left: 350px;
-	width: 100%; height: 720px;
+	margin-left: 350px;
+	width: 100%; 
+	height: 720px;
 	position: relative;
-    background: #283242;
     opacity: 0.8;
 	overflow: hidden;
 }
