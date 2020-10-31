@@ -19,7 +19,7 @@ body {
     position: fixed!important;
     margin: 0 auto!important;
     bottom:10%!important;
-    right: 10!important;
+    left: 10!important;
     width: 5%!important; 
     opacity: 0.8!important;  
     background-color: #1e1934!important;
@@ -38,7 +38,7 @@ body {
     position: fixed!important;
     margin: 0 auto!important;
     bottom:5%!important;
-    left: 10!important;
+    right: 10!important;
     width: 40%!important; 
     opacity: 0.8!important;  
     background-color: #1e1934!important;
@@ -61,7 +61,7 @@ body {
     position: fixed!important;
     margin: 0 auto!important;
     bottom:5%!important;
-    right: 10!important;
+    left: 10!important;
     width: 40%!important; 
     opacity: 0.8!important;  
     background-color: #1e1934!important;
@@ -80,7 +80,7 @@ body {
     position: fixed!important;
     margin: 0 auto!important;
     bottom:5%!important;
-    left: 10!important;
+    right: 10!important;
     width: 40%!important; 
     opacity: 0.8!important;  
     background-color: #1e1934!important;
