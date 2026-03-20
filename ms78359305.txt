@@ -1,0 +1,5 @@
+﻿{
+  "Description": "Domain ownership verification file for Microsoft 365 - place in the website root",
+  "Domain": "toilaloc.github.io",
+  "Id": "b38df1af-ea78-42e8-8e06-1b1b1073ab04"
+}
