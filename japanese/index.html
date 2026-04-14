@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>日本語学習 — Nihongo Study</title>
+  <meta name="description" content="Ứng dụng học tiếng Nhật với flashcard, giải bài tập AI và luyện viết tay Kanji/Kana."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800;900&family=Noto+Sans+JP:wght@300;400;500;700&family=Noto+Serif+JP:wght@400;700&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/hanzi-writer@3.5/dist/hanzi-writer.min.js"></script>
+  <link rel="stylesheet" href="nihongo-study.css"/>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="#">
+    <div class="logo-mark">日</div>
+    Nihongo Study <span class="logo-sub">/ học tiếng Nhật</span>
+  </a>
+  <div class="db-badge">
+    <div class="db-dot loading" id="dbDot"></div>
+    <span id="dbLabel">connecting...</span>
+  </div>
+</header>
+
+<nav>
+  <button class="nav-btn active" onclick="switchTab('flashcard')">🃏 Flashcard</button>
+  <button class="nav-btn" onclick="switchTab('import')">📄 Giải bài tập</button>
+  <button class="nav-btn" onclick="switchTab('draw')">✍️ Viết tay</button>
+  <button class="nav-btn" onclick="switchTab('practice')">📝 Luyện tập</button>
+  <button class="nav-btn" onclick="switchTab('sheet')">🖨️ Tạo vở</button>
+</nav>
+
+<main>
+
+  <!-- ── FLASHCARD ── -->
+  <div class="panel active" id="panel-flashcard">
+    <div class="stats-row">
+      <div class="stat"><div class="stat-num" id="stTotal">—</div><div class="stat-lbl">tổng thẻ</div></div>
+      <div class="stat"><div class="stat-num" id="stN5">—</div><div class="stat-lbl">N5</div></div>
+      <div class="stat"><div class="stat-num" id="stN4">—</div><div class="stat-lbl">N4</div></div>
+      <div class="stat"><div class="stat-num" id="stOther">—</div><div class="stat-lbl">khác</div></div>
+    </div>
+
+    <div class="lbl">thêm thẻ mới</div>
+    <div class="input-row">
+      <input type="text" id="inpJP"   placeholder="日本語"/>
+      <input type="text" id="inpRom"  placeholder="Romaji"/>
+      <input type="text" id="inpMean" placeholder="Nghĩa tiếng Việt" style="flex:2;"/>
+      <input type="text" id="inpTag"  placeholder="Tag" style="max-width:68px;"/>
+      <button class="btn btn-red" onclick="addCard()">+ Thêm</button>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:1.25rem;flex-wrap:wrap;">
+      <button class="btn" onclick="toggleStudy()" id="studyBtn">▶ Study Mode</button>
+      <button class="btn" onclick="toggleAIGen()" id="aiGenBtn">✦ AI tạo thẻ</button>
+      <div style="margin-left:auto;display:flex;gap:6px;">
+        <button class="btn btn-sm btn-ghost" onclick="loadCards()">↻ Sync</button>
+        <button class="btn btn-sm btn-ghost" onclick="exportJSON()">⬇ Export</button>
+      </div>
+    </div>
+
+    <!-- Study Mode -->
+    <div id="studyWrap" style="display:none;">
+      <div class="lbl">study mode</div>
+      <div class="progress-bar"><div class="progress-fill" id="progFill"></div></div>
+      <div class="study-card" id="studyCardEl" onclick="revealCard()">
+        <div class="s-jp"  id="sJP">—</div>
+        <div class="s-rom" id="sRom"></div>
+        <div class="s-mean" id="sMean"></div>
+      </div>
+      <div class="study-nav">
+        <button class="btn" onclick="prevCard()">← Trước</button>
+        <span class="study-counter" id="studyCtr">1 / 1</span>
+        <button class="btn" onclick="nextCard()">Tiếp →</button>
+        <button class="btn btn-sm" onclick="shuffleCards()">🔀</button>
+      </div>
+      <hr style="border:none;border-top:1px solid var(--br);margin:1.25rem 0;">
+    </div>
+
+    <!-- AI Gen -->
+    <div class="ai-gen-box" id="aiGenBox" style="display:none;">
+      <div class="lbl">tạo flashcard bằng Gemini AI</div>
+      <textarea id="aiGenPrompt" placeholder="Ví dụ: tạo 10 từ N5 về đồ ăn&#10;hoặc: 8 động từ N4 thường gặp&#10;hoặc: các mẫu câu xin lỗi tiếng Nhật"></textarea>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-red" id="aiGenRunBtn" onclick="runAIGen()">✦ Tạo ngay ↗</button>
+        <button class="btn" onclick="toggleAIGen()">Huỷ</button>
+      </div>
+    </div>
+
+    <div class="sync-row" id="syncRow" style="display:none;">
+      <span>☁</span><span id="syncMsg"></span>
+    </div>
+
+    <div class="lbl">bộ thẻ <span id="cardCountLbl" style="color:var(--muted);">(0)</span></div>
+    <div class="card-grid" id="cardGrid"></div>
+    <div class="empty" id="emptyState">
+      <div class="empty-icon">📭</div>
+      <p>Chưa có flashcard nào.<br>Thêm tay hoặc dùng AI để tạo!</p>
+    </div>
+  </div>
+
+  <!-- ── IMPORT / SOLVE ── -->
+  <div class="panel" id="panel-import">
+    <div class="lbl">upload bài tập</div>
+    <div class="upload-zone" id="uploadZone"
+      onclick="document.getElementById('fileInput').click()"
+      ondragover="event.preventDefault();this.classList.add('drag')"
+      ondragleave="this.classList.remove('drag')"
+      ondrop="handleDrop(event)">
+      <input type="file" id="fileInput" accept="image/*,.pdf" onchange="handleFile(event)"/>
+      <span class="uz-icon">📷</span>
+      <span class="uz-title">Kéo thả hoặc click để chọn file</span>
+      <span class="uz-sub">Ảnh chụp bài tập JPG / PNG · PDF</span>
+    </div>
+    <div class="preview-wrap" id="previewWrap">
+      <img id="previewImg" alt="preview"/>
+      <button class="preview-clear" onclick="clearFile()">✕</button>
+    </div>
+    <div class="manual-area">
+      <div class="lbl" style="margin-bottom:.5rem;">hoặc nhập câu hỏi trực tiếp</div>
+      <textarea id="manualQ" placeholder="Paste câu hỏi tiếng Nhật vào đây...&#10;&#10;Ví dụ: 「私は学生___す。」に入る言葉は？&#10;① で  ② に  ③ を  ④ が"></textarea>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-red" onclick="solveAI()">✦ Giải bài ↗</button>
+      <button class="btn" onclick="grammarAI()">📖 Ngữ pháp</button>
+      <button class="btn" onclick="translateAI()">🌐 Dịch</button>
+      <button class="btn" onclick="vocabAI()">📚 Rút từ vựng</button>
+    </div>
+    <div class="lbl">kết quả Gemini</div>
+    <div class="ai-output" id="aiOutput">Upload ảnh hoặc nhập câu hỏi, rồi chọn chức năng AI ✦</div>
+    <div id="addVocabRow" style="margin-top:.75rem;display:none;">
+      <button class="btn btn-sm btn-red" onclick="addVocabToCards()">➕ Thêm từ vựng vào Flashcard &amp; lưu Supabase</button>
+    </div>
+  </div>
+
+  <!-- ── DRAW ── -->
+  <div class="panel" id="panel-draw">
+    <div class="draw-layout">
+      <div class="draw-toolbar">
+        <span style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;">size:</span>
+        <button class="brush-btn active" onclick="setBrush(4,this)"><span class="brush-dot" style="width:4px;height:4px;"></span></button>
+        <button class="brush-btn" onclick="setBrush(8,this)"><span class="brush-dot" style="width:8px;height:8px;"></span></button>
+        <button class="brush-btn" onclick="setBrush(14,this)"><span class="brush-dot" style="width:14px;height:14px;"></span></button>
+        <button class="brush-btn" onclick="setBrush(22,this)"><span class="brush-dot" style="width:18px;height:18px;"></span></button>
+        <div class="sep"></div>
+        <span style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;">màu:</span>
+        <div class="swatch active" style="background:#181816;" onclick="setColor('#181816',this)"></div>
+        <div class="swatch" style="background:#C0392B;" onclick="setColor('#C0392B',this)"></div>
+        <div class="swatch" style="background:#1a5276;" onclick="setColor('#1a5276',this)"></div>
+        <div class="swatch" style="background:#1e8449;" onclick="setColor('#1e8449',this)"></div>
+        <div class="sep"></div>
+        <button class="btn btn-sm" onclick="clearCanvas()">🗑 Xóa</button>
+        <button class="btn btn-sm btn-red" onclick="recognizeAI()">✦ Nhận dạng ↗</button>
+        <button class="btn btn-sm" onclick="toggleGrid()" id="gridBtn">格子 ON</button>
+      </div>
+      <div class="canvas-wrap" id="canvasWrap">
+        <svg id="gridSVG" xmlns="http://www.w3.org/2000/svg"></svg>
+        <canvas id="drawCanvas" height="320"></canvas>
+      </div>
+      <div>
+        <div class="lbl">chữ mẫu</div>
+        <div class="char-pills">
+          <span class="char-pill" onclick="setPractice(this,'あ')">あ</span>
+          <span class="char-pill" onclick="setPractice(this,'い')">い</span>
+          <span class="char-pill" onclick="setPractice(this,'う')">う</span>
+          <span class="char-pill" onclick="setPractice(this,'え')">え</span>
+          <span class="char-pill" onclick="setPractice(this,'お')">お</span>
+          <span class="char-pill" onclick="setPractice(this,'か')">か</span>
+          <span class="char-pill" onclick="setPractice(this,'日')">日</span>
+          <span class="char-pill" onclick="setPractice(this,'本')">本</span>
+          <span class="char-pill" onclick="setPractice(this,'語')">語</span>
+          <span class="char-pill" onclick="setPractice(this,'愛')">愛</span>
+          <span class="char-pill" onclick="setPractice(this,'山')">山</span>
+          <span class="char-pill" onclick="setPractice(this,'水')">水</span>
+          <span style="color:var(--faint);font-size:14px;margin:0 4px;">│</span>
+          <input type="text" id="customChar" maxlength="1" style="width:48px;height:38px;text-align:center;font-family:'Noto Serif JP',serif;font-size:20px;padding:0;border:2px solid var(--br);border-radius:10px;outline:none;background:#fff;transition:border-color 0.15s;" placeholder="字" onfocus="this.style.borderColor='var(--green)'" onblur="this.style.borderColor='var(--br)'" onkeydown="if(event.key==='Enter'){setPractice(null,this.value.trim());this.blur();}"/>
+          <button class="btn btn-sm btn-green" onclick="setPractice(null,document.getElementById('customChar').value.trim())" style="font-size:12px;">Xem nét</button>
+        </div>
+      </div>
+      <div>
+        <div class="lbl">kết quả nhận dạng</div>
+        <div class="draw-result" id="drawResult">Vẽ một chữ Hán/Kana rồi nhấn <strong>✦ Nhận dạng</strong></div>
+      </div>
+
+      <!-- Stroke Order -->
+      <div>
+        <div class="lbl">thứ tự nét <span style="color:var(--faint);font-size:10px;">(bấm vào chữ mẫu để xem)</span></div>
+        <div class="stroke-order-box" id="strokeOrderBox">
+          <div class="stroke-order-placeholder" id="strokeOrderPlaceholder">
+            <span>選択</span>
+            <p>Chọn một chữ mẫu bên trên để xem thứ tự nét</p>
+          </div>
+          <div id="strokeOrderContent" style="display:none;">
+            <div class="stroke-order-char-display">
+              <div class="soc-char" id="socChar">—</div>
+              <div class="soc-info">
+                <div class="soc-name" id="socName">—</div>
+                <div class="soc-count" id="socCount">— nét</div>
+              </div>
+            </div>
+            <div class="stroke-steps-wrap" id="strokeStepsWrap"></div>
+            <div class="stroke-anim-wrap">
+              <div id="strokeAnimTarget" style="width:200px;height:200px;border:2px solid #E5E5E5;border-radius:12px;background:#F7F5F0;"></div>
+              <div class="stroke-anim-controls">
+                <button class="btn btn-sm" id="strokePlayBtn" onclick="playStrokeAnim()">▶ Xem animation</button>
+                <button class="btn btn-sm btn-ghost" onclick="resetStrokeAnim()">↺ Reset</button>
+                <span class="stroke-anim-label" id="strokeAnimLabel"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── PRACTICE ── -->
+  <div class="panel" id="panel-practice">
+
+    <!-- Config row -->
+    <div class="practice-config no-print">
+
+      <!-- Row 1: Level + Mode toggle -->
+      <div class="pc-row-split">
+        <div class="pc-group">
+          <div class="lbl" style="margin-bottom:.4rem;">cấp độ</div>
+          <div class="level-pills" id="levelPills">
+            <button class="level-pill active" data-level="N5" onclick="selectLevel(this,'N5')">N5</button>
+            <button class="level-pill" data-level="N4" onclick="selectLevel(this,'N4')">N4</button>
+            <button class="level-pill" data-level="N3" onclick="selectLevel(this,'N3')">N3</button>
+          </div>
+        </div>
+        <div class="pc-group">
+          <div class="lbl" style="margin-bottom:.4rem;">chế độ</div>
+          <div style="display:flex;gap:6px;">
+            <button class="mode-pill active" id="modeLevelBtn" onclick="selectMode('level')">📊 Theo Level</button>
+            <button class="mode-pill" id="modeLessonBtn" onclick="selectMode('lesson')">📖 Theo Bài học</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lesson picker (hidden by default) -->
+      <div id="lessonPickerWrap" style="display:none;">
+        <div class="lbl" style="margin-bottom:.5rem;">chọn bài học <span id="lessonLevelLabel" style="color:var(--red);">— N5</span></div>
+        <div class="lesson-grid" id="lessonGrid"></div>
+        <div class="lesson-info-box" id="lessonInfoBox" style="display:none;">
+          <div class="lib-header">
+            <span class="lib-badge" id="libBadge">Bài 1</span>
+            <span class="lib-title" id="libTitle">はじめまして</span>
+          </div>
+          <div class="lib-body">
+            <div class="lib-col">
+              <div class="lib-lbl">📖 Ngữ pháp chính</div>
+              <div class="lib-val" id="libGrammar">—</div>
+            </div>
+            <div class="lib-col">
+              <div class="lib-lbl">📚 Chủ đề từ vựng</div>
+              <div class="lib-val" id="libVocab">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Exercise type — JLPT format -->
+      <div class="pc-group">
+        <div class="lbl" style="margin-bottom:.5rem;">dạng đề <span style="color:var(--faint);font-size:10px;">(theo format JLPT thật)</span></div>
+        <div class="jlpt-type-grid" id="typePills">
+
+          <div class="jlpt-section-label">語彙 Từ vựng</div>
+          <div class="jlpt-type-row">
+            <button class="type-pill" data-type="mondai1" onclick="selectType(this,'mondai1')">
+              <span class="tp-num">問題1</span>
+              <span class="tp-name">漢字読み</span>
+              <span class="tp-desc">Cách đọc Kanji</span>
+            </button>
+            <button class="type-pill" data-type="mondai2" onclick="selectType(this,'mondai2')">
+              <span class="tp-num">問題2</span>
+              <span class="tp-name">表記</span>
+              <span class="tp-desc">Viết bằng Kanji</span>
+            </button>
+            <button class="type-pill" data-type="mondai3" onclick="selectType(this,'mondai3')">
+              <span class="tp-num">問題3</span>
+              <span class="tp-name">文脈規定</span>
+              <span class="tp-desc">Chọn từ đúng ngữ cảnh</span>
+            </button>
+            <button class="type-pill" data-type="mondai4" onclick="selectType(this,'mondai4')">
+              <span class="tp-num">問題4</span>
+              <span class="tp-name">言い換え</span>
+              <span class="tp-desc">Từ đồng nghĩa</span>
+            </button>
+          </div>
+
+          <div class="jlpt-section-label">文法 Ngữ pháp</div>
+          <div class="jlpt-type-row">
+            <button class="type-pill" data-type="mondai5" onclick="selectType(this,'mondai5')">
+              <span class="tp-num">問題5</span>
+              <span class="tp-name">文法形式</span>
+              <span class="tp-desc">Điền trợ từ / mẫu câu</span>
+            </button>
+            <button class="type-pill" data-type="mondai6" onclick="selectType(this,'mondai6')">
+              <span class="tp-num">問題6</span>
+              <span class="tp-name">並べ替え</span>
+              <span class="tp-desc">Sắp xếp thành câu</span>
+            </button>
+            <button class="type-pill" data-type="mondai7" onclick="selectType(this,'mondai7')">
+              <span class="tp-num">問題7</span>
+              <span class="tp-name">文章の文法</span>
+              <span class="tp-desc">Điền vào đoạn văn</span>
+            </button>
+          </div>
+
+          <div class="jlpt-section-label">読解 Đọc hiểu</div>
+          <div class="jlpt-type-row">
+            <button class="type-pill" data-type="mondai8" onclick="selectType(this,'mondai8')">
+              <span class="tp-num">問題8</span>
+              <span class="tp-name">短文読解</span>
+              <span class="tp-desc">Đọc đoạn ngắn</span>
+            </button>
+            <button class="type-pill active" data-type="all" onclick="selectType(this,'all')">
+              <span class="tp-num">🎲</span>
+              <span class="tp-name">ランダム</span>
+              <span class="tp-desc">Ngẫu nhiên hỗn hợp</span>
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Count + Generate -->
+      <div class="pc-group no-print">
+        <div class="lbl" style="margin-bottom:.4rem;">số lượng câu</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <select id="qCount" class="pc-select">
+            <option value="3">3 câu</option>
+            <option value="5" selected>5 câu</option>
+            <option value="10">10 câu</option>
+            <option value="15">15 câu</option>
+            <option value="20">20 câu</option>
+            <option value="25">25 câu</option>
+            <option value="30">30 câu</option>
+            <option value="40">40 câu</option>
+            <option value="50">50 câu</option>
+            <option value="60">60 câu</option>
+            <option value="70">70 câu</option>
+            <option value="80">80 câu</option>
+            <option value="90">90 câu</option>
+            <option value="100">100 câu</option>
+          </select>
+          <button class="btn btn-red" id="genPracticeBtn" onclick="generatePractice()">✦ Tạo bài tập ↗</button>
+          <span id="genContextLabel" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--faint);"></span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Exercise area -->
+    <div id="exerciseArea" style="display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:8px;" class="no-print">
+        <div class="lbl" style="margin:0;">bài tập</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span class="practice-score" id="practiceScore"></span>
+          <button class="btn btn-sm" onclick="window.print()" style="background:#3C3C3C;color:#fff;">🖨️ In / PDF</button>
+          <button class="btn btn-sm" onclick="generatePractice()">↻ Tạo bài mới</button>
+        </div>
+      </div>
+      <div id="questionList"></div>
+      <div style="display:flex;gap:8px;margin-top:1.25rem;flex-wrap:wrap;" id="practiceActions" class="no-print">
+        <button class="btn btn-red" onclick="submitAnswers()" id="submitBtn">✦ Nộp bài &amp; chấm điểm</button>
+        <button class="btn" onclick="showAllAnswers()">👁 Xem đáp án</button>
+      </div>
+      <div id="practiceResult" class="no-print" style="display:none;margin-top:1rem;"></div>
+    </div>
+
+    <!-- Vocab Explainer -->
+    <div class="vocab-explainer-box no-print" style="margin-top:1.5rem;">
+      <div class="lbl">giải thích từ vựng / ngữ pháp</div>
+      <div class="ve-row">
+        <input type="text" id="veInput" placeholder="Nhập từ hoặc mẫu ngữ pháp cần tra (VD: 食べる、〜てください、N5 動詞)" style="flex:1;height:42px;padding:0 14px;font-size:14px;"/>
+        <button class="btn btn-red" onclick="explainVocab()" id="veBtn">✦ Giải thích ↗</button>
+      </div>
+      <div class="ve-output" id="veOutput">Nhập từ vựng hoặc mẫu câu cần tra, AI sẽ giải thích chi tiết bằng tiếng Việt ✦</div>
+    </div>
+
+  </div>
+
+  <!-- ── TẠO VỞ TẬP VIẾT ── -->
+  <div class="panel" id="panel-sheet">
+    <div class="lbl">Tạo vở luyện viết Kanji/Kana bản in (A4 PDF)</div>
+    
+    <div class="no-print" style="display:flex;gap:8px;margin-bottom:1rem;flex-wrap:wrap;">
+      <button class="btn btn-sm" onclick="showKanjiList('N5')" id="kbtn-N5">Kanji N5</button>
+      <button class="btn btn-sm" onclick="showKanjiList('N4')" id="kbtn-N4">Kanji N4</button>
+      <button class="btn btn-sm" onclick="showKanjiList('N3')" id="kbtn-N3">Kanji N3</button>
+      <button class="btn btn-sm" style="background:#fff;border-color:var(--br);color:var(--muted);" onclick="clearKanjiList()">Đóng</button>
+    </div>
+    
+    <div id="kanjiPicker" class="no-print" style="display:none;margin-bottom:1rem;padding:12px;background:#fff;border-radius:10px;border:2px solid var(--br);flex-wrap:wrap;gap:6px;">
+    </div>
+    
+    <div class="no-print" style="display:flex;gap:8px;margin-bottom:1.25rem;flex-wrap:wrap;">
+      <input type="text" id="sheetInput" placeholder="Nhập các chữ hoặc chọn từ danh sách trên..." style="flex:1;height:42px;padding:0 14px;border:2px solid var(--br);border-radius:10px;font-size:16px;outline:none;" onfocus="this.style.borderColor='var(--green)'" onblur="this.style.borderColor='var(--br)'" onkeydown="if(event.key==='Enter') generateSheet()"/>
+      <button class="btn btn-green" onclick="generateSheet()" id="genSheetBtn">✦ Tạo vở ↗</button>
+      <button class="btn" style="background:#3C3C3C;color:#fff;border-color:#3C3C3C;" onclick="window.print()" id="printSheetBtn" disabled>🖨️ In / PDF</button>
+    </div>
+    
+    <div id="sheetStatus" class="no-print" style="font-size:14px;color:var(--faint);margin-bottom:1rem;font-family:'Nunito',sans-serif;"></div>
+    
+    <div class="sheet-preview-wrap">
+      <div id="sheetPreview" class="print-area">
+        <!-- Generates here -->
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script src="nihongo-study.js"></script>
+
+<!--
+╔══════════════════════════════════════════════════╗
+║  SUPABASE SQL SETUP — chạy trong SQL Editor      ║
+╠══════════════════════════════════════════════════╣
+║                                                  ║
+║  create table flashcards (                       ║
+║    id uuid default gen_random_uuid() primary key,║
+║    jp   text not null,                           ║
+║    rom  text,                                    ║
+║    mean text not null,                           ║
+║    tag  text,                                    ║
+║    created_at timestamptz default now()          ║
+║  );                                              ║
+║                                                  ║
+║  alter table flashcards                          ║
+║    enable row level security;                    ║
+║                                                  ║
+║  create policy "public access"                   ║
+║    on flashcards for all                         ║
+║    using (true) with check (true);               ║
+║                                                  ║
+╚══════════════════════════════════════════════════╝
+-->
+</body>
+</html>

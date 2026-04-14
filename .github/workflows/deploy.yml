@@ -1,0 +1,45 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: ["main", "master"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inject Secrets into JavaScript
+        run: |
+          sed -i "s|__SB_URL__|${{ secrets.SB_URL }}|g" nihongo-study.js
+          sed -i "s|__SB_KEY__|${{ secrets.SB_KEY }}|g" nihongo-study.js
+          sed -i "s|__GROQ_KEY__|${{ secrets.GROQ_KEY }}|g" nihongo-study.js
+          sed -i "s|__GROQ_URL__|${{ secrets.GROQ_URL }}|g" nihongo-study.js
+          sed -i "s|__GROQ_MODEL__|${{ secrets.GROQ_MODEL }}|g" nihongo-study.js
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
