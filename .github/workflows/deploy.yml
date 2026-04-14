@@ -29,11 +29,11 @@ jobs:
 
       - name: Inject Secrets into JavaScript
         run: |
-          sed -i "s|__SB_URL__|${{ secrets.SB_URL }}|g" nihongo-study.js
-          sed -i "s|__SB_KEY__|${{ secrets.SB_KEY }}|g" nihongo-study.js
-          sed -i "s|__GROQ_KEY__|${{ secrets.GROQ_KEY }}|g" nihongo-study.js
-          sed -i "s|__GROQ_URL__|${{ secrets.GROQ_URL }}|g" nihongo-study.js
-          sed -i "s|__GROQ_MODEL__|${{ secrets.GROQ_MODEL }}|g" nihongo-study.js
+          sed -i "s|__SB_URL__|${{ secrets.SB_URL }}|g" japanese/nihongo-study.js
+          sed -i "s|__SB_KEY__|${{ secrets.SB_KEY }}|g" japanese/nihongo-study.js
+          sed -i "s|__GROQ_KEY__|${{ secrets.GROQ_KEY }}|g" japanese/nihongo-study.js
+          sed -i "s|__GROQ_URL__|${{ secrets.GROQ_URL }}|g" japanese/nihongo-study.js
+          sed -i "s|__GROQ_MODEL__|${{ secrets.GROQ_MODEL }}|g" japanese/nihongo-study.js
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
