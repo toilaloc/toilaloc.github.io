@@ -1,13 +1,13 @@
 // ═══════════════════════════════════
 // CONFIG
 // ═══════════════════════════════════
-const SB_URL = '__SB_URL__';
+const SB_URL = 'https://ktbeyflghrgzeyroqxyq.supabase.co';
 const SB_KEY = '__SB_KEY__';
 
 // ── Groq (free, https://console.groq.com/keys) ──
 const GROQ_KEY = '__GROQ_KEY__';
-const GROQ_URL = '__GROQ_URL__';
-const GROQ_MODEL = '__GROQ_MODEL__';
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'; // free vision model
 
 const SB_H = {
   'Content-Type': 'application/json',
