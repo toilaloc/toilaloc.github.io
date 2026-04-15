@@ -18,11 +18,35 @@
     <div class="logo-mark">日</div>
     Nihongo Study <span class="logo-sub">/ học tiếng Nhật</span>
   </a>
-  <div class="db-badge">
-    <div class="db-dot loading" id="dbDot"></div>
-    <span id="dbLabel">connecting...</span>
+  <div class="header-right">
+    <div class="db-badge">
+      <div class="db-dot loading" id="dbDot"></div>
+      <span id="dbLabel">connecting...</span>
+    </div>
+    <div class="user-area" id="userArea">
+      <!-- Filled by JS: login btn or user info -->
+    </div>
   </div>
 </header>
+
+<!-- ── LOGIN MODAL ── -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-modal">
+    <div class="login-logo">日</div>
+    <h2 class="login-title">Nihongo Study</h2>
+    <p class="login-subtitle">Đăng nhập hoặc tạo tài khoản mới</p>
+    <div class="login-form">
+      <label class="login-label" for="loginEmail">📧 Email</label>
+      <input type="email" id="loginEmail" class="login-input" placeholder="email@example.com" />
+      <div id="nameFieldGroup" style="display: none;">
+        <label class="login-label" for="loginName">👤 Tên hiển thị</label>
+        <input type="text" id="loginName" class="login-input" placeholder="Tên của bạn" />
+      </div>
+      <button class="btn btn-green login-btn" id="loginBtn" onclick="handleLogin()">🚀 Đăng nhập</button>
+      <p class="login-hint" id="loginHint"></p>
+    </div>
+  </div>
+</div>
 
 <nav>
   <button class="nav-btn active" onclick="switchTab('flashcard')">🃏 Flashcard</button>

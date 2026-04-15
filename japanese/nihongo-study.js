@@ -1,14 +1,13 @@
 // ═══════════════════════════════════
 // CONFIG
 // ═══════════════════════════════════
-const SB_URL = '__SB_URL__';
-const SB_KEY = '__SB_KEY__';
+const SB_URL = 'https://ktbeyflghrgzeyroqxyq.supabase.co';
+const SB_KEY = 'sb_publishable_u9xhjtHKVMZEXGeE-DaYgw_Gikln52n';
 
 // ── Groq (free, https://console.groq.com/keys) ──
 const GROQ_KEY = '__GROQ_KEY__';
-const GROQ_URL = '__GROQ_URL__';
-const GROQ_MODEL = '__GROQ_MODEL__';
-
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
 const SB_H = {
   'Content-Type': 'application/json',
   'apikey': SB_KEY,
@@ -25,12 +24,15 @@ let brushSize = 4, brushColor = '#181816';
 let drawing = false, lx = 0, ly = 0;
 let showGrid = true, practiceChar = '';
 
+// Auth state
+let currentUser = null; // { id, email, name }
+
 // ═══════════════════════════════════
 // BOOT
 // ═══════════════════════════════════
 window.addEventListener('DOMContentLoaded', () => {
   initCanvas();
-  loadCards();
+  checkAuth();
 });
 
 // ═══════════════════════════════════
@@ -42,12 +44,15 @@ function setDB(state, msg) {
 }
 
 async function sbGet() {
-  const r = await fetch(`${SB_URL}/rest/v1/flashcards?order=created_at.asc`, { headers: SB_H });
+  if (!currentUser) return [];
+  const r = await fetch(`${SB_URL}/rest/v1/flashcards?user_id=eq.${currentUser.id}&order=created_at.asc`, { headers: SB_H });
   if (!r.ok) throw new Error('read ' + r.status);
   return r.json();
 }
 
 async function sbAdd(data) {
+  if (!currentUser) throw new Error('Cần đăng nhập để lưu thẻ');
+  data.user_id = currentUser.id;
   const r = await fetch(`${SB_URL}/rest/v1/flashcards`, {
     method: 'POST',
     headers: { ...SB_H, 'Prefer': 'return=representation' },
@@ -62,10 +67,138 @@ async function sbDel(id) {
   if (!r.ok) throw new Error('delete ' + r.status);
 }
 
+// ── Auth Helpers ──
+async function sbGetUser(email) {
+  const r = await fetch(`${SB_URL}/rest/v1/users?email=eq.${encodeURIComponent(email)}`, { headers: SB_H });
+  if (!r.ok) throw new Error('Lỗi kiểm tra user');
+  const users = await r.json();
+  return users.length > 0 ? users[0] : null;
+}
+
+async function sbCreateUser(email, name) {
+  const r = await fetch(`${SB_URL}/rest/v1/users`, {
+    method: 'POST',
+    headers: { ...SB_H, 'Prefer': 'return=representation' },
+    body: JSON.stringify({ email, name })
+  });
+  if (!r.ok) throw new Error('Lỗi tạo user');
+  const users = await r.json();
+  return users[0];
+}
+
+// ═══════════════════════════════════
+// AUTHENTICATION LOGIC
+// ═══════════════════════════════════
+function checkAuth() {
+  const saved = localStorage.getItem('nh_user');
+  if (saved) {
+    currentUser = JSON.parse(saved);
+  }
+  updateAuthUI();
+}
+
+function updateAuthUI() {
+  const area = document.getElementById('userArea');
+  const overlay = document.getElementById('loginOverlay');
+
+  if (currentUser) {
+    const initial = currentUser.name ? currentUser.name.charAt(0).toUpperCase() : '?';
+    area.innerHTML = `
+      <div class="user-chip" title="${currentUser.email}">
+        <div class="user-avatar">${initial}</div>
+        <div class="user-name">${currentUser.name}</div>
+      </div>
+      <button class="user-logout" onclick="handleLogout()">Đăng xuất</button>
+    `;
+    overlay.classList.remove('show');
+    loadCards(); // Load user-specific cards
+  } else {
+    area.innerHTML = `<button class="user-login-btn" onclick="showLogin()">🔐 Đăng nhập</button>`;
+    cards = [];
+    renderCards();
+    showLogin();
+  }
+}
+
+function showLogin() {
+  document.getElementById('loginOverlay').classList.add('show');
+  document.getElementById('loginHint').textContent = '';
+  document.getElementById('nameFieldGroup').style.display = 'none';
+  const btn = document.getElementById('loginBtn');
+  btn.textContent = '🚀 Đăng nhập / Tiếp tục';
+  btn.disabled = false;
+  setTimeout(() => document.getElementById('loginEmail').focus(), 100);
+}
+
+function handleLogout() {
+  localStorage.removeItem('nh_user');
+  currentUser = null;
+  updateAuthUI();
+}
+
+async function handleLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const nameGroup = document.getElementById('nameFieldGroup');
+  const nameInput = document.getElementById('loginName');
+  const name = nameInput.value.trim();
+  const hint = document.getElementById('loginHint');
+  const btn = document.getElementById('loginBtn');
+
+  if (!email) { hint.textContent = 'Vui lòng nhập email'; return; }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Đang xử lý...';
+  hint.style.color = 'var(--ink)';
+  hint.textContent = 'Đang kiểm tra tài khoản...';
+
+  try {
+    let user = await sbGetUser(email);
+    if (user) {
+      // User exists - login
+      currentUser = user;
+      localStorage.setItem('nh_user', JSON.stringify(user));
+      showToast('Đăng nhập thành công! 👋');
+      updateAuthUI();
+      return;
+    } else {
+      // User doesn't exist. If name field is hidden, show it
+      if (nameGroup.style.display === 'none') {
+        nameGroup.style.display = 'block';
+        hint.textContent = 'Email chưa đăng ký. Nhập Tên của bạn để tạo tài khoản mới.';
+        btn.textContent = '✨ Tạo tài khoản mới';
+        btn.disabled = false;
+        nameInput.focus();
+        return;
+      }
+
+      // If name field is already visible, check if they entered a name
+      if (!name) {
+        throw new Error('Vui lòng nhập tên hiển thị để đăng ký');
+      }
+      user = await sbCreateUser(email, name);
+      currentUser = user;
+      localStorage.setItem('nh_user', JSON.stringify(user));
+      showToast('Tạo tài khoản thành công! 🎉');
+      updateAuthUI();
+      return;
+    }
+  } catch (e) {
+    hint.style.color = 'var(--red)';
+    hint.textContent = e.message;
+  }
+
+  btn.disabled = false;
+  btn.textContent = nameGroup.style.display === 'none' ? '🚀 Đăng nhập / Tiếp tục' : '✨ Tạo tài khoản mới';
+}
+
 // ═══════════════════════════════════
 // LOAD / SYNC
 // ═══════════════════════════════════
 async function loadCards() {
+  if (!currentUser) {
+    setDB('error', 'Chưa đăng nhập');
+    return;
+  }
   setDB('loading', 'syncing...');
   showSync('↻ Đang tải từ Supabase...');
   try {
@@ -899,6 +1032,9 @@ function selectType(el, tp) {
 }
 
 // ── JLPT prompt templates per 問題 type ──
+// All prompts now request a "furigana" field: array of {kanji, reading} for kanji in question/options/passage
+const FURIGANA_RULE = `\n重要: 各問題に "furigana" フィールドを必ず追加してください。question・options・passage内の全ての漢字語に対し、[{"kanji":"漢字","reading":"かんじ"},...] の配列で振り仮名を付けてください。`;
+
 const JLPT_PROMPTS = {
 
   mondai1: (level, count, ctx) => `
@@ -908,8 +1044,8 @@ ${ctx}
 形式: 文中の___の漢字の読み方を①〜④から選ぶ。
 
 JSONのみ返してください（markdownなし）:
-[{"type":"mondai1","question":"___の言葉の読み方は何ですか。例: 毎朝、新聞を（読み）ます。","target":"対象の漢字語","ruby":"","options":["①よみ","②かき","③みる","④はなし"],"answer":"①よみ","explanation":"「読み」はよみと読みます。動詞「読む」の連用形。"}]
-ルール: JLPT ${level}レベルの漢字のみ。optionsは読み方（ひらがな）のみ。JSONの文字列内に改行禁止。${count}問ちょうど。`,
+[{"type":"mondai1","question":"___の言葉の読み方は何ですか。例: 毎朝、新聞を（読み）ます。","target":"対象の漢字語","ruby":"","options":["①よみ","②かき","③みる","④はなし"],"answer":"①よみ","explanation":"「読み」はよみと読みます。動詞「読む」の連用形。","furigana":[{"kanji":"毎朝","reading":"まいあさ"},{"kanji":"新聞","reading":"しんぶん"},{"kanji":"読み","reading":"よみ"},{"kanji":"言葉","reading":"ことば"}]}]
+ルール: JLPT ${level}レベルの漢字のみ。optionsは読み方（ひらがな）のみ。JSONの文字列内に改行禁止。${count}問ちょうど。${FURIGANA_RULE}`,
 
   mondai2: (level, count, ctx) => `
 あなたはJLPT${level}問題作成者です。
@@ -918,8 +1054,8 @@ ${ctx}
 形式: ひらがな/カタカナの語に対して正しい漢字表記を選ぶ。
 
 JSONのみ返してください:
-[{"type":"mondai2","question":"___のことばはどう書きますか。例: まいにち　べんきょうしています。","target":"べんきょう","ruby":"","options":["①勉強","②便強","③文強","④文章"],"answer":"①勉強","explanation":"「べんきょう」は「勉強」と書きます。"}]
-ルール: JLPT ${level}語彙範囲のみ。optionsは漢字表記。JSONの文字列内に改行禁止。${count}問ちょうど。`,
+[{"type":"mondai2","question":"___のことばはどう書きますか。例: まいにち　べんきょうしています。","target":"べんきょう","ruby":"","options":["①勉強","②便強","③文強","④文章"],"answer":"①勉強","explanation":"「べんきょう」は「勉強」と書きます。","furigana":[{"kanji":"勉強","reading":"べんきょう"},{"kanji":"便強","reading":"べんきょう"},{"kanji":"文強","reading":"ぶんきょう"},{"kanji":"文章","reading":"ぶんしょう"}]}]
+ルール: JLPT ${level}語彙範囲のみ。optionsは漢字表記。JSONの文字列内に改行禁止。${count}問ちょうど。${FURIGANA_RULE}`,
 
   mondai3: (level, count, ctx) => `
 あなたはJLPT${level}問題作成者です。
@@ -928,8 +1064,8 @@ ${ctx}
 形式: 文の（　）に入る最も適切な言葉を選ぶ。
 
 JSONのみ返してください:
-[{"type":"mondai3","question":"（　）に入れるのに最もよいものを選んでください。\\n駅まで歩いて（　）分かかります。","ruby":"","options":["①だいたい","②すこし","③もっと","④まだ"],"answer":"①だいたい","explanation":"「だいたい〜分」で「おおよそ〜分」の意味。時間の大まかな見積もりに使う。"}]
-ルール: 4択。文脈で判断できる語彙問題。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。`,
+[{"type":"mondai3","question":"（　）に入れるのに最もよいものを選んでください。\\n駅まで歩いて（　）分かかります。","ruby":"","options":["①だいたい","②すこし","③もっと","④まだ"],"answer":"①だいたい","explanation":"「だいたい〜分」で「おおよそ〜分」の意味。時間の大まかな見積もりに使う。","furigana":[{"kanji":"駅","reading":"えき"},{"kanji":"歩","reading":"ある"},{"kanji":"分","reading":"ぷん"}]}]
+ルール: 4択。文脈で判断できる語彙問題。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。${FURIGANA_RULE}`,
 
   mondai4: (level, count, ctx) => `
 あなたはJLPT${level}問題作成者です。
@@ -938,8 +1074,8 @@ ${ctx}
 形式: ___の言葉に意味が最も近いものを選ぶ。
 
 JSONのみ返してください:
-[{"type":"mondai4","question":"___の言葉に意味が最も近いものを選んでください。\\n彼はとても（たいせつ）なものをなくしました。","target":"たいせつ","ruby":"","options":["①大切","②重要","③必要","④特別"],"answer":"②重要","explanation":"「大切」と「重要」はほぼ同義。価値があって大事という意味。"}]
-ルール: ターゲット語と選択肢はすべて${level}レベル範囲。${count}問ちょうど。JSONの文字列内に改行禁止。`,
+[{"type":"mondai4","question":"___の言葉に意味が最も近いものを選んでください。\\n彼はとても（たいせつ）なものをなくしました。","target":"たいせつ","ruby":"","options":["①大切","②重要","③必要","④特別"],"answer":"②重要","explanation":"「大切」と「重要」はほぼ同義。価値があって大事という意味。","furigana":[{"kanji":"言葉","reading":"ことば"},{"kanji":"意味","reading":"いみ"},{"kanji":"彼","reading":"かれ"},{"kanji":"大切","reading":"たいせつ"},{"kanji":"重要","reading":"じゅうよう"},{"kanji":"必要","reading":"ひつよう"},{"kanji":"特別","reading":"とくべつ"}]}]
+ルール: ターゲット語と選択肢はすべて${level}レベル範囲。${count}問ちょうど。JSONの文字列内に改行禁止。${FURIGANA_RULE}`,
 
   mondai5: (level, count, ctx) => `
 あなたはJLPT${level}問題作成者です。
@@ -948,8 +1084,8 @@ ${ctx}
 形式: （　）に入る文法形式・助詞・接続詞を4択で選ぶ。実際のJLPT問題と同じ難易度。
 
 JSONのみ返してください:
-[{"type":"mondai5","question":"（　）に入れるのに最もよいものを選んでください。\\n病気（　）、学校を休みました。","ruby":"","options":["①だから","②なので","③ので","④から"],"answer":"③ので","explanation":"「〜ので」は客観的な理由を述べる丁寧な表現。「〜から」より柔らかく書き言葉・話し言葉両方で使える。"}]
-ルール: ${level}の文法項目のみ。Minna no Nihongo ${level}範囲に準拠。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。`,
+[{"type":"mondai5","question":"（　）に入れるのに最もよいものを選んでください。\\n病気（　）、学校を休みました。","ruby":"","options":["①だから","②なので","③ので","④から"],"answer":"③ので","explanation":"「〜ので」は客観的な理由を述べる丁寧な表現。「〜から」より柔らかく書き言葉・話し言葉両方で使える。","furigana":[{"kanji":"病気","reading":"びょうき"},{"kanji":"学校","reading":"がっこう"},{"kanji":"休","reading":"やす"}]}]
+ルール: ${level}の文法項目のみ。Minna no Nihongo ${level}範囲に準拠。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。${FURIGANA_RULE}`,
 
   mondai6: (level, count, ctx) => `
 あなたはJLPT${level}問題作成者です。
@@ -958,8 +1094,8 @@ ${ctx}
 実際のJLPT問題と全く同じ形式: 4つの語句を並べ替えて文を作り、★の位置に来る語句を選ぶ。
 
 JSONのみ返してください:
-[{"type":"mondai6","question":"次の文の　★　に入る最もよいものを選んでください。\\n田中さんは　___　___　★　___　います。","ruby":"","scrambled":["①日本語を","②先生に","③教えて","④もらって"],"options":["①日本語を","②先生に","③教えて","④もらって"],"answer":"③教えて","correct_order":"②先生に①日本語を③教えて④もらって","explanation":"「先生に日本語を教えてもらっています」。★の位置は3番目→「教えて」。〜てもらう構文。"}]
-ルール: scrambled と options は同じ4語句。answer は★の位置の語句。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。`,
+[{"type":"mondai6","question":"次の文の　★　に入る最もよいものを選んでください。\\n田中さんは　___　___　★　___　います。","ruby":"","scrambled":["①日本語を","②先生に","③教えて","④もらって"],"options":["①日本語を","②先生に","③教えて","④もらって"],"answer":"③教えて","correct_order":"②先生に①日本語を③教えて④もらって","explanation":"「先生に日本語を教えてもらっています」。★の位置は3番目→「教えて」。〜てもらう構文。","furigana":[{"kanji":"田中","reading":"たなか"},{"kanji":"日本語","reading":"にほんご"},{"kanji":"先生","reading":"せんせい"},{"kanji":"教","reading":"おし"}]}]
+ルール: scrambled と options は同じ4語句。answer は★の位置の語句。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。${FURIGANA_RULE}`,
 
   mondai7: (level, count, ctx) => `
 あなたはJLPT${level}問題作成者です。
@@ -969,8 +1105,8 @@ ${ctx}
 → 1セット = 1つの文章 + ${count}個の空欄問題として生成してください。
 
 JSONのみ返してください（各空欄を1問として配列に入れる）:
-[{"type":"mondai7","passage":"私は毎日電車（1）会社に行きます。家（2）駅まで15分（3）かかります。","question":"（1）に入れるのに最もよいものを選んでください。","ruby":"","options":["①で","②に","③を","④が"],"answer":"①で","explanation":"移動手段には助詞「で」を使う。「電車で行く」。"}]
-ルール: 文章は自然な日本語。空欄ごとに1オブジェクト。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。`,
+[{"type":"mondai7","passage":"私は毎日電車（1）会社に行きます。家（2）駅まで15分（3）かかります。","question":"（1）に入れるのに最もよいものを選んでください。","ruby":"","options":["①で","②に","③を","④が"],"answer":"①で","explanation":"移動手段には助詞「で」を使う。「電車で行く」。","furigana":[{"kanji":"毎日","reading":"まいにち"},{"kanji":"電車","reading":"でんしゃ"},{"kanji":"会社","reading":"かいしゃ"},{"kanji":"家","reading":"いえ"},{"kanji":"駅","reading":"えき"}]}]
+ルール: 文章は自然な日本語。空欄ごとに1オブジェクト。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。${FURIGANA_RULE}`,
 
   mondai8: (level, count, ctx) => `
 あなたはJLPT${level}問題作成者です。
@@ -979,8 +1115,8 @@ ${ctx}
 形式: 150〜200字の読解文1つ + それに関する質問${count}問。実際のJLPT読解問題と同じ難易度。
 
 JSONのみ返してください:
-[{"type":"mondai8","passage":"（読解文をここに）","question":"筆者が言いたいことは何ですか。","ruby":"","options":["①...","②...","③...","④..."],"answer":"②...","explanation":"本文〜の部分から〜であることが読み取れる。"}]
-ルール: passage は全問共通（最初の1問のみ入れ、残りはpassage省略可）。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。`,
+[{"type":"mondai8","passage":"（読解文をここに）","question":"筆者が言いたいことは何ですか。","ruby":"","options":["①...","②...","③...","④..."],"answer":"②...","explanation":"本文〜の部分から〜であることが読み取れる。","furigana":[{"kanji":"筆者","reading":"ひっしゃ"}]}]
+ルール: passage は全問共通（最初の1問のみ入れ、残りはpassage省略可）。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。${FURIGANA_RULE}`,
 
   all: (level, count, ctx) => `
 あなたはJLPT${level}・Minna no Nihongo専門の日本語教師です。
@@ -989,8 +1125,8 @@ ${ctx}
 各問題に type フィールドで種別を示してください（mondai1〜mondai8）。
 
 JSONのみ返してください:
-[{"type":"mondai1|mondai2|mondai3|mondai4|mondai5|mondai6|mondai7|mondai8","question":"...","ruby":"","options":["①...","②...","③...","④..."],"answer":"①...","explanation":"...（ベトナム語で80語以内）"}]
-ルール: options は MCQ のみ。mondai6 は correct_order フィールドも追加。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。`
+[{"type":"mondai1|mondai2|mondai3|mondai4|mondai5|mondai6|mondai7|mondai8","question":"...","ruby":"","options":["①...","②...","③...","④..."],"answer":"①...","explanation":"...（ベトナム語で80語以内）","furigana":[{"kanji":"漢字語","reading":"ひらがな読み"}]}]
+ルール: options は MCQ のみ。mondai6 は correct_order フィールドも追加。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。${FURIGANA_RULE}`
 };
 
 // ── Build prompt ──
@@ -1018,8 +1154,8 @@ ${ctx}
 各問題に type フィールドで種別を示してください。（例: mondai1 等）
 
 JSONのみ返してください:
-[{"type":"mondaiN","question":"...","ruby":"","options":["①...","②...","③...","④..."],"answer":"①...","explanation":"...（ベトナム語で80語以内）"}]
-ルール: options は MCQ のみ。mondai6 は correct_order フィールドも追加。mondai7の場合は passage も含める。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。`;
+[{"type":"mondaiN","question":"...","ruby":"","options":["①...","②...","③...","④..."],"answer":"①...","explanation":"...（ベトナム語で80語以内）","furigana":[{"kanji":"漢字語","reading":"ひらがな読み"}]}]
+ルール: options は MCQ のみ。mondai6 は correct_order フィールドも追加。mondai7の場合は passage も含める。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。${FURIGANA_RULE}`;
 }
 
 // ── Parse AI JSON response helper ──
@@ -1028,6 +1164,73 @@ function parseExerciseJSON(raw) {
   const match = clean.match(/\[[\s\S]*\]/);
   if (!match) throw new Error('Không parse được JSON từ AI');
   return JSON.parse(match[0]);
+}
+
+// ── Extract all Japanese text from exercises ──
+function extractAllText(exercises) {
+  const texts = [];
+  exercises.forEach(q => {
+    if (q.question) texts.push(q.question);
+    if (q.passage) texts.push(q.passage);
+    if (q.target) texts.push(q.target);
+    if (q.correct_order) texts.push(q.correct_order);
+    if (q.options) q.options.forEach(o => texts.push(o));
+    if (q.scrambled) q.scrambled.forEach(s => texts.push(s));
+  });
+  return texts.join('\n');
+}
+
+// ── Detect kanji words from text ──
+function extractKanjiWords(text) {
+  if (!text) return [];
+  // CJK Unified Ideographs: \u4E00-\u9FFF, \u3400-\u4DBF
+  const re = /[\u4E00-\u9FFF\u3400-\u4DBF][\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u309F\u30A0-\u30FF]*/g;
+  const matches = text.match(re) || [];
+  return [...new Set(matches)].filter(w => w.length > 0);
+}
+
+// ── Fetch furigana from AI for kanji words ──
+async function fetchFurigana(kanjiWords) {
+  if (!kanjiWords || kanjiWords.length === 0) return [];
+  const wordList = kanjiWords.join(', ');
+  const prompt = `Return the hiragana reading for each of the following kanji words. Return ONLY a JSON array (no markdown):\n[{"kanji":"word","reading":"hiragana"}]\n\nWords: ${wordList}\n\nRules: most common reading, include ALL words, no newlines inside JSON strings.`;
+  try {
+    const raw = await callGemini(prompt);
+    let c = raw.replace(/```json|```/g, '').trim().replace(/\n/g, ' ');
+    const m = c.match(/\[\s*\{[\s\S]*\}\s*\]/);
+    if (m) return JSON.parse(m[0]);
+  } catch (e) { console.warn('Furigana fetch failed:', e); }
+  return [];
+}
+
+// ── Ensure all exercises have furigana ──
+async function ensureFurigana(exercises) {
+  const allText = extractAllText(exercises);
+  const kanjiWords = extractKanjiWords(allText);
+  if (kanjiWords.length === 0) return;
+
+  // Merge existing furigana from AI
+  const map = new Map();
+  exercises.forEach(q => {
+    if (q.furigana && Array.isArray(q.furigana)) {
+      q.furigana.forEach(f => { if (f.kanji && f.reading) map.set(f.kanji, f.reading); });
+    }
+  });
+
+  // Find missing
+  const missing = kanjiWords.filter(w => !map.has(w));
+  if (missing.length > 0) {
+    const BATCH = 80;
+    for (let i = 0; i < missing.length; i += BATCH) {
+      const batch = missing.slice(i, i + BATCH);
+      const results = await fetchFurigana(batch);
+      results.forEach(f => { if (f.kanji && f.reading) map.set(f.kanji, f.reading); });
+    }
+  }
+
+  // Build full list and assign to every exercise
+  const fullList = Array.from(map.entries()).map(([kanji, reading]) => ({ kanji, reading }));
+  exercises.forEach(q => { q.furigana = fullList; });
 }
 
 // ── Generate exercises (supports up to 100 via batching) ──
@@ -1054,12 +1257,16 @@ async function generatePractice() {
   try {
     currentExercises = [];
     for (let b = 0; b < batches.length; b++) {
-      btn.textContent = batches.length > 1 ? `⏳ Batch ${b + 1}/${batches.length}...` : '...';
+      btn.textContent = batches.length > 1 ? `⏳ Batch ${b + 1}/${batches.length}...` : '⏳ Đang tạo...';
       const prompt = buildPracticePrompt(practiceLevel, practiceTypes, batches[b]);
       const raw = await callGemini(prompt);
       currentExercises.push(...parseExerciseJSON(raw));
-      renderExercises(currentExercises); // render progressively
+      renderExercises(currentExercises); // render progressively (no furigana yet)
     }
+    // Auto-fetch furigana for all kanji
+    btn.textContent = '⏳ Đang thêm furigana...';
+    await ensureFurigana(currentExercises);
+    renderExercises(currentExercises); // re-render with furigana
     showToast(`✓ Tạo ${currentExercises.length} câu hỏi thành công!`);
   } catch (e) {
     if (currentExercises.length === 0)
@@ -1095,17 +1302,18 @@ const TYPE_LABELS = {
 function renderOneQuestion(q, i) {
   const [cssType, label] = TYPE_LABELS[q.type] || ['mcq', q.type];
   const hasOptions = q.options && q.options.length > 0;
+  const fg = q.furigana; // furigana list [{kanji, reading}, ...]
 
   let bodyHTML = '';
 
   if (q.type === 'mondai6') {
     // 並べ替え: show scrambled word tiles + pick which goes in ★ slot
     const tiles = (q.scrambled || q.options || []).map(t =>
-      `<span class="scramble-tile">${escHTML(t)}</span>`).join('');
+      `<span class="scramble-tile">${furiganaHTML(t, fg)}</span>`).join('');
     const opts = (q.options || []).map((opt, oi) => `
       <div class="mcq-opt" id="opt_${i}_${oi}" onclick="selectOpt(${i},${oi})">
         <span class="mcq-label">${['①', '②', '③', '④'][oi] || oi + 1}</span>
-        <span>${escHTML(opt)}</span>
+        <span>${furiganaHTML(opt, fg)}</span>
       </div>`).join('');
     bodyHTML = `
       <div class="scramble-tiles">${tiles}</div>
@@ -1116,27 +1324,27 @@ function renderOneQuestion(q, i) {
     const opts = (q.options || []).map((opt, oi) => `
       <div class="mcq-opt" id="opt_${i}_${oi}" onclick="selectOpt(${i},${oi})">
         <span class="mcq-label">${['①', '②', '③', '④'][oi] || oi + 1}</span>
-        <span>${escHTML(opt)}</span>
+        <span>${furiganaHTML(opt, fg)}</span>
       </div>`).join('');
     bodyHTML = `
-      <div class="reading-passage">${escHTML(q.passage)}</div>
+      <div class="reading-passage">${furiganaHTML(q.passage, fg)}</div>
       <div class="mcq-options">${opts}</div>`;
 
   } else if (q.type === 'mondai7' && q.passage) {
     const opts = (q.options || []).map((opt, oi) => `
       <div class="mcq-opt" id="opt_${i}_${oi}" onclick="selectOpt(${i},${oi})">
         <span class="mcq-label">${['①', '②', '③', '④'][oi] || oi + 1}</span>
-        <span>${escHTML(opt)}</span>
+        <span>${furiganaHTML(opt, fg)}</span>
       </div>`).join('');
     bodyHTML = `
-      <div class="reading-passage mondai7-passage">${escHTML(q.passage)}</div>
+      <div class="reading-passage mondai7-passage">${furiganaHTML(q.passage, fg)}</div>
       <div class="mcq-options">${opts}</div>`;
 
   } else if (hasOptions) {
     const opts = q.options.map((opt, oi) => `
       <div class="mcq-opt" id="opt_${i}_${oi}" onclick="selectOpt(${i},${oi})">
         <span class="mcq-label">${['①', '②', '③', '④'][oi] || (oi + 1)}</span>
-        <span>${escHTML(opt)}</span>
+        <span>${furiganaHTML(opt, fg)}</span>
       </div>`).join('');
     bodyHTML = `<div class="mcq-options">${opts}</div>`;
   } else {
@@ -1149,9 +1357,9 @@ function renderOneQuestion(q, i) {
       <span class="q-num">Q${i + 1}</span>
       <span class="q-type-badge q-type-${cssType}">${label}</span>
       <div style="flex:1;">
-        <div class="q-text">${escHTML(q.question)}</div>
+        <div class="q-text">${furiganaHTML(q.question, fg)}</div>
         ${q.ruby ? `<div class="q-sub">📖 ${escHTML(q.ruby)}</div>` : ''}
-        ${q.target ? `<div class="q-target">対象語: <strong>${escHTML(q.target)}</strong></div>` : ''}
+        ${q.target ? `<div class="q-target">対象語: <strong>${furiganaHTML(q.target, fg)}</strong></div>` : ''}
         ${q.correct_order ? `<div class="q-sub q-order-hint" style="display:none;">正しい順: ${escHTML(q.correct_order)}</div>` : ''}
       </div>
     </div>
@@ -1163,6 +1371,37 @@ function renderOneQuestion(q, i) {
 function escHTML(s) {
   if (s == null || s === '') return '';
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ── Furigana: add ruby annotations for kanji ──
+// furiganaList: array of {kanji: "漢字", reading: "かんじ"}
+// text: the original text string
+// Returns HTML string with <ruby> tags for matched kanji
+function furiganaHTML(text, furiganaList) {
+  if (!text) return '';
+  let html = escHTML(text);
+  if (!furiganaList || !Array.isArray(furiganaList) || furiganaList.length === 0) {
+    return html;
+  }
+  // Sort by kanji length descending so longer matches are replaced first
+  const sorted = [...furiganaList].sort((a, b) => (b.kanji || '').length - (a.kanji || '').length);
+  // Use placeholders to avoid double-replacement
+  const placeholders = [];
+  sorted.forEach(f => {
+    if (!f.kanji || !f.reading) return;
+    const escaped = escHTML(f.kanji).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escaped, 'g');
+    html = html.replace(regex, (match) => {
+      const idx = placeholders.length;
+      placeholders.push(`<ruby>${match}<rt>${escHTML(f.reading)}</rt></ruby>`);
+      return `\x00FURIGANA_${idx}\x00`;
+    });
+  });
+  // Replace placeholders with actual ruby HTML
+  placeholders.forEach((replacement, idx) => {
+    html = html.replace(`\x00FURIGANA_${idx}\x00`, replacement);
+  });
+  return html;
 }
 
 // ── Option selection ──
@@ -1377,80 +1616,83 @@ document.addEventListener('DOMContentLoaded', () => {
 // ═══════════════════════════════════
 const MNN_LESSONS = {
   N5: [
-    { lesson: 1, title: 'はじめまして', grammar: 'N は N です／じゃありません／ですか', vocab: 'Danh từ chỉ người, quốc tịch, nghề nghiệp' },
-    { lesson: 2, title: 'これ・それ・あれ', grammar: 'これ／それ／あれ は N です', vocab: 'Đồ vật, đây / đó / kia' },
-    { lesson: 3, title: 'ここ・そこ・あそこ', grammar: 'ここ／そこ／あそこ は N です', vocab: 'Nơi chốn, phòng, tầng' },
-    { lesson: 4, title: 'いま なんじ ですか', grammar: '〜時〜分、〜から〜まで', vocab: 'Giờ giấc, thời gian, lịch trình' },
-    { lesson: 5, title: 'いくらですか', grammar: 'N を ください, いくら', vocab: 'Mua sắm, số đếm, tiền tệ' },
-    { lesson: 6, title: 'まいにち なんじに おきますか', grammar: '動詞 ます形, 〜に〜ます', vocab: 'Sinh hoạt hàng ngày, trạng từ thời gian' },
-    { lesson: 7, title: 'やすみは なんにちですか', grammar: '〜曜日、〜から〜まで、〜と〜', vocab: 'Thứ, ngày tháng, lịch nghỉ' },
-    { lesson: 8, title: 'わたしは えいごで にほんごを おしえています', grammar: 'N で V, N を V', vocab: 'Ngôn ngữ, dạy học, phương tiện' },
-    { lesson: 9, title: 'しゅうまつ どこかへ いきますか', grammar: '〜へ行きます/来ます/帰ります、〜で/に', vocab: 'Di chuyển, giao thông, địa điểm' },
-    { lesson: 10, title: 'いっしょに いきませんか', grammar: '〜ませんか、〜ましょう', vocab: 'Rủ rê, đề nghị, hoạt động' },
-    { lesson: 11, title: 'わたしは あの みせで たべました', grammar: '〜た形 (động từ quá khứ)', vocab: 'Ăn uống, nhà hàng, thực phẩm' },
-    { lesson: 12, title: 'このまちに どんな たてものが ありますか', grammar: 'あります／います、〜に〜があります', vocab: 'Địa điểm trong thành phố, tồn tại' },
-    { lesson: 13, title: 'きょうは あついですね', grammar: '形容詞 い／な (thể hiện tại)', vocab: 'Tính từ mô tả, thời tiết' },
-    { lesson: 14, title: 'すずきさんの かばんは どれですか', grammar: '〜のです、〜は〜より〜', vocab: 'So sánh, mô tả sự vật' },
-    { lesson: 15, title: 'まいにち みちを あるきます', grammar: '〜て形 (liệt kê hành động)', vocab: 'Đường phố, hoạt động ngoài trời' },
-    { lesson: 16, title: 'ちかてつの のりかた', grammar: '〜て form (sử dụng hướng dẫn)', vocab: 'Phương tiện giao thông, tàu điện' },
-    { lesson: 17, title: 'きっぷを かって おきます', grammar: '〜ておきます、〜てから', vocab: 'Chuẩn bị, du lịch, vé' },
-    { lesson: 18, title: 'あのこうえんを さんぽしました', grammar: '〜てみます、〜てしまいます', vocab: 'Công viên, hoạt động thử nghiệm' },
-    { lesson: 19, title: 'もっとゆっくり はなしてください', grammar: '〜てください、〜てはいけません', vocab: 'Yêu cầu, chỉ dẫn, quy tắc' },
-    { lesson: 20, title: 'さくらが きれいだったですね', grammar: '〜た形 tính từ quá khứ, 〜でした', vocab: 'Bốn mùa, thiên nhiên, cảm xúc' },
-    { lesson: 21, title: 'たなかさんが しっています', grammar: '〜ています (trạng thái / nghề nghiệp)', vocab: 'Trạng thái hiện tại, kiến thức' },
-    { lesson: 22, title: 'このきじは たかいですが、いいです', grammar: '〜が (tuy nhiên), 〜けど', vocab: 'Mua sắm, chất lượng sản phẩm' },
-    { lesson: 23, title: 'やまのぼりを したことが ありますか', grammar: '〜たことがあります', vocab: 'Trải nghiệm, sở thích, leo núi' },
-    { lesson: 24, title: 'もし じかんが あったら いきたいです', grammar: '〜たら (điều kiện)', vocab: 'Mong muốn, điều kiện, kế hoạch' },
-    { lesson: 25, title: 'はやく やすんだほうが いいですよ', grammar: '〜た方がいい、〜ない方がいい', vocab: 'Sức khỏe, lời khuyên, bệnh viện' },
+    // ── みんなの日本語 初級 I（第1課〜第25課）──
+    { lesson: 1, title: 'わたしは マイク・ミラーです', grammar: 'N は N です／じゃありません／ですか、N も', vocab: 'Quốc tịch, nghề nghiệp, tuổi, giới thiệu bản thân' },
+    { lesson: 2, title: 'これは 辞書です', grammar: 'これ／それ／あれ は N です、この／その／あの N', vocab: 'Đồ vật, quà tặng, sở hữu (N の N)' },
+    { lesson: 3, title: 'ここは 食堂です', grammar: 'ここ／そこ／あそこ は N です、N は どこですか', vocab: 'Địa điểm, tầng, quốc gia, phòng ban' },
+    { lesson: 4, title: '今 何時ですか', grammar: '今〜時〜分です、V ます／ません／ました、〜から〜まで', vocab: 'Giờ giấc, sinh hoạt hàng ngày, thời gian biểu' },
+    { lesson: 5, title: '甲子園へ 行きますか', grammar: 'N(nơi)へ 行きます／来ます／帰ります、N(phương tiện)で、Nと', vocab: 'Di chuyển, phương tiện, đi cùng ai' },
+    { lesson: 6, title: 'いっしょに 行きませんか', grammar: 'N を V(tha動詞)、N で V(nơi hành động)、V ませんか／ましょう', vocab: 'Ăn uống, hoạt động, mời rủ' },
+    { lesson: 7, title: 'ごみの 出し方', grammar: 'N(công cụ)で V、N に あげます／もらいます、もう〜ました', vocab: 'Dụng cụ, cho/nhận quà, ngôn ngữ' },
+    { lesson: 8, title: 'そろそろ 失礼します', grammar: 'い形容詞・な形容詞(긍定/부정)、N は Adj です、どんな N', vocab: 'Tính từ mô tả, cảm xúc, thành phố, đánh giá' },
+    { lesson: 9, title: '残念ですが…', grammar: 'N が あります／わかります、N が 好き／嫌い／上手／下手、〜から(lý do)', vocab: 'Sở thích, năng lực, phó từ mức độ (よく・だいたい・少し・あまり・全然)' },
+    { lesson: 10, title: 'チリソースは ありませんか', grammar: 'N(vật)が あります／N(người)が います、N は N(nơi)に あります／います、N の N(vị trí)', vocab: 'Đồ vật, gia đình, vị trí (上・下・前・後ろ・隣)' },
+    { lesson: 11, title: 'これ、お願いします', grammar: '助数詞(〜つ・〜人・〜台・〜枚…)、N を ください、どのくらい', vocab: 'Số đếm, bưu điện, mua hàng, thời gian bao lâu' },
+    { lesson: 12, title: 'お祭りは どうでしたか', grammar: 'N は N より Adj、N の 中で N が いちばん Adj、N と N と どちらが Adj', vocab: 'So sánh, mùa, thời tiết, thể thao, quá khứ tính từ (〜でした／〜かったです)' },
+    { lesson: 13, title: '別々に お願いします', grammar: 'N が ほしいです、V ます形 たいです、N へ V に 行きます', vocab: 'Mong muốn, du lịch, đặt hàng, mục đích di chuyển' },
+    { lesson: 14, title: 'みどり町まで お願いします', grammar: 'V て形(グループ分け)、V てください、V ています(đang làm)', vocab: 'Chỉ đường, hướng dẫn taxi, yêu cầu lịch sự' },
+    { lesson: 15, title: 'ご家族は？', grammar: 'V てもいいです、V てはいけません、V ています(trạng thái)', vocab: 'Cho phép, cấm, nghề nghiệp, gia đình, trạng thái hôn nhân' },
+    { lesson: 16, title: '使い方を 教えてください', grammar: 'V て、V て、V(liệt kê hành động)、Adj くて/で(nối tính từ)、V てから', vocab: 'Trình tự hành động, ATM, cách sử dụng, mô tả' },
+    { lesson: 17, title: 'どう しましたか', grammar: 'V ない形、V ないでください、V なければなりません、V なくてもいいです', vocab: 'Bệnh viện, triệu chứng, sức khỏe, nghĩa vụ' },
+    { lesson: 18, title: '趣味は 何ですか', grammar: 'V 辞書形、N／V ことが できます、趣味は V ことです、V₁ 前に V₂', vocab: 'Sở thích, khả năng, thể từ điển, piano, bơi lội' },
+    { lesson: 19, title: 'ダイエットは あしたから します', grammar: 'V た形、V たことが あります、V たり V たり します、Adj く／に なります', vocab: 'Trải nghiệm, liệt kê hành động, thay đổi trạng thái' },
+    { lesson: 20, title: 'いっしょに 行かない？', grammar: 'Thể thông thường(丁寧→普通)、V る／V ない／V た、Adj い→い、な→だ', vocab: 'Giao tiếp thân mật, bạn bè, hội thoại đời thường' },
+    { lesson: 21, title: 'わたしも そう 思います', grammar: '普通形と 思います、普通形と 言います、V る／V ない でしょう？', vocab: 'Ý kiến, truyền đạt, suy nghĩ, dự đoán' },
+    { lesson: 22, title: 'どんな アパートが いいですか', grammar: '名詞修飾(V 普通形 N)、V る 時間／場所／約束、V た N', vocab: 'Nhà ở, tìm phòng, mô tả bằng mệnh đề quan hệ' },
+    { lesson: 23, title: 'どうやって 行きますか', grammar: 'V る/V た/V ない 時、〜と(điều kiện tự nhiên)、N が Adj / V', vocab: 'Giao thông, chỉ đường, hướng dẫn' },
+    { lesson: 24, title: '手伝いに 行きましょうか', grammar: 'くれます、V て くれます、V て あげます／もらいます', vocab: 'Cho/nhận ơn, giúp đỡ, gia đình, quan hệ xã hội' },
+    { lesson: 25, title: 'いろいろ お世話に なりました', grammar: '〜たら(điều kiện/giả thuyết)、V ても(dù cho)、〜たら いいですか', vocab: 'Điều kiện, nhượng bộ, lời khuyên, từ biệt' },
   ],
   N4: [
-    { lesson: 26, title: 'この本は読みやすいです', grammar: '〜やすい／にくい', vocab: 'Tính chất hành động' },
-    { lesson: 27, title: 'この荷物を運んでいただけませんか', grammar: '〜ていただけませんか、〜てもらう', vocab: 'Nhờ vả lịch sự, hành lý' },
-    { lesson: 28, title: 'たばこを吸ってもいいですか', grammar: '〜てもいいです／〜てはいけません', vocab: 'Quy tắc, cho phép, cấm' },
-    { lesson: 29, title: '部屋に鍵をかけておきましょう', grammar: '〜ておく (chuẩn bị)', vocab: 'Nhà ở, đồ dùng gia đình' },
-    { lesson: 30, title: 'このへやは広くて、明るいです', grammar: '〜て (nối tính từ)', vocab: 'Mô tả phòng ốc, nhà cửa' },
-    { lesson: 31, title: '友達が来たとき、うちにいました', grammar: '〜とき (thời điểm)', vocab: 'Thời gian, tình huống' },
-    { lesson: 32, title: '熱があるなら、休んだほうがいいです', grammar: '〜なら (giả thuyết)', vocab: 'Sức khỏe, triệu chứng, bệnh viện' },
-    { lesson: 33, title: '電車が遅れているようです', grammar: '〜ようです、〜そうです (truyền đạt)', vocab: 'Tin tức, phương tiện, dự đoán' },
-    { lesson: 34, title: 'もっと日本語が上手になりたい', grammar: '〜になります、〜くなります', vocab: 'Thay đổi, mục tiêu học tập' },
-    { lesson: 35, title: '子供のころよく川で泳ぎました', grammar: '〜ころ、〜ながら', vocab: 'Ký ức, tuổi thơ, hoạt động' },
-    { lesson: 36, title: '荷物はもう送ってあります', grammar: '〜てある (kết quả còn lưu)', vocab: 'Trạng thái chuẩn bị, chuẩn bị sẵn' },
-    { lesson: 37, title: '兄はシンガポールへ行ったことがあります', grammar: '〜たことがある (kinh nghiệm)', vocab: 'Du lịch nước ngoài, kinh nghiệm' },
-    { lesson: 38, title: '予約しておきました', grammar: '〜ておいた、〜てしまった', vocab: 'Đặt chỗ, hoàn thành, tiếc nuối' },
-    { lesson: 39, title: '道を教えていただけますか', grammar: '〜ていただく、〜てくださる', vocab: 'Xin giúp đỡ, hỏi đường' },
-    { lesson: 40, title: '日本語で話せるようになりました', grammar: '〜ようになる、〜ことができる', vocab: 'Khả năng, tiến bộ, kỹ năng' },
-    { lesson: 41, title: '電話してくれてありがとう', grammar: '〜てくれる／あげる／もらう', vocab: 'Ơn nghĩa, trao đổi, quan hệ xã hội' },
-    { lesson: 42, title: '部長に報告しなければなりません', grammar: '〜なければならない、〜なくてもいい', vocab: 'Công sở, nghĩa vụ, báo cáo' },
-    { lesson: 43, title: '車が止まっています', grammar: '〜ている (kết quả / trạng thái tiếp diễn)', vocab: 'Giao thông, mô tả cảnh vật' },
-    { lesson: 44, title: '荷物が多すぎます', grammar: '〜すぎます、〜すぎ', vocab: 'Mức độ quá, hành lý, số lượng' },
-    { lesson: 45, title: '知らないことばは辞書で調べます', grammar: '〜ば (điều kiện)', vocab: 'Học từ điển, tìm kiếm thông tin' },
-    { lesson: 46, title: '彼女は歌が上手だそうです', grammar: '〜そうです (nghe nói)', vocab: 'Tin đồn, sở thích, âm nhạc' },
-    { lesson: 47, title: '窓を開けてもいいですか', grammar: 'Hỏi xin phép + từ chối lịch sự', vocab: 'Không gian sinh hoạt, xã giao' },
-    { lesson: 48, title: '新しいパソコンが欲しいです', grammar: '〜ほしい、〜てほしい', vocab: 'Mong muốn, mua sắm, công nghệ' },
-    { lesson: 49, title: '引っ越してから生活が変わりました', grammar: '〜てから、〜たあとで', vocab: 'Chuyển nhà, thay đổi cuộc sống' },
-    { lesson: 50, title: '子供のとき、どんな子でしたか', grammar: '〜たら (điều kiện quá khứ), 〜でした', vocab: 'Kỷ niệm, tính cách, tuổi thơ' },
+    // ── みんなの日本語 初級 II（第26課〜第50課）──
+    { lesson: 26, title: 'どこかへ 出かけませんか', grammar: 'V る/V ない/V た/Adj 普通形 んです、V ないんですか、どうして〜 んですか', vocab: 'Giải thích lý do, hỏi nguyên nhân, tìm hiểu tình huống' },
+    { lesson: 27, title: 'いい お湯ですね', grammar: 'Khả năng: V ます→V れます(可能動詞)、見えます/聞こえます、できました', vocab: 'Khả năng, cảm nhận, nhà hàng, onsen' },
+    { lesson: 28, title: 'リサイクルに 出すんですよ', grammar: 'V ながら、V ています(thói quen)、V る/V た/Adj 普通形 し、〜し', vocab: 'Thói quen, liệt kê lý do, tái chế, đời sống' },
+    { lesson: 29, title: '忘れ物を して しまったんです', grammar: 'V て しまいました、V て ありました、V て おきます', vocab: 'Chuẩn bị, tiếc nuối, quên đồ, sắp xếp' },
+    { lesson: 30, title: 'いい 町ですね', grammar: 'V て あります(kết quả hành động)、V て おきます(chuẩn bị trước)', vocab: 'Thông báo, chuẩn bị sự kiện, cảnh quan, bố trí' },
+    { lesson: 31, title: '将来 何に なりたいですか', grammar: 'Ý định: V 意向形(〜よう)、V つもりです、V る 予定です、まだ V ていません', vocab: 'Tương lai, kế hoạch, dự định, nghề nghiệp mơ ước' },
+    { lesson: 32, title: 'このままの ほうが いいです', grammar: 'V た ほうが いいです、V ない ほうが いいです、V る/V ない でしょう、かもしれません', vocab: 'Lời khuyên, dự đoán, sức khỏe, thời tiết' },
+    { lesson: 33, title: 'どう すれば いいですか', grammar: 'Mệnh lệnh: V ろ/V なさい、Cấm: V な、〜と 言っていました(truyền đạt)、〜と 伝えてください', vocab: 'Mệnh lệnh, cấm, truyền đạt lời nói, biển báo' },
+    { lesson: 34, title: 'あの 読み方で 読んでください', grammar: 'V₁ た/V₁ ない 通りに V₂(làm theo)、V₁ た 後で V₂、V ないで', vocab: 'Hướng dẫn, nấu ăn, lắp ráp, trình tự' },
+    { lesson: 35, title: '日本の おかげで', grammar: '〜ば(điều kiện ば形)、V ば/Adj ければ/N なら、〜ば いいですか', vocab: 'Điều kiện, giả thuyết, cách giải quyết vấn đề' },
+    { lesson: 36, title: 'けさから 何も 食べて いないんです', grammar: 'V る ように します(cố gắng)、V る ように なります(thay đổi)、V ない ように', vocab: 'Rèn luyện, thay đổi thói quen, sức khỏe, mục tiêu' },
+    { lesson: 37, title: 'インドで 手で ごはんを 食べられました', grammar: 'Bị động: V られます(受身形)、N に V られます、N は V られています', vocab: 'Bị động, phát minh, văn hóa, lịch sử' },
+    { lesson: 38, title: '楽しかった 思い出', grammar: 'V る/V た の は Adj です(danh từ hóa V)、V る/V ない のを忘れました、V る の が 好きです', vocab: 'Cảm xúc, sở thích, đánh giá hành động' },
+    { lesson: 39, title: 'ニュースを 聞いて びっくりしました', grammar: 'V て/V ないで(nguyên nhân/cách thức)、Adj くて/で(nguyên nhân)、N で(nguyên nhân)', vocab: 'Cảm xúc, tin tức, nguyên nhân, lý do vui buồn' },
+    { lesson: 40, title: '友達が できるか どうか 心配です', grammar: 'Nghi vấn gián tiếp: V か どうか、疑問詞 V か、V て みます(thử làm)', vocab: 'Lo lắng, quyết định, thử nghiệm, câu hỏi gián tiếp' },
+    { lesson: 41, title: 'プレゼントを もらったんですが…', grammar: 'V て いただきます、V て くださいます、V て やります(cho cấp dưới)', vocab: 'Cho/nhận lịch sự, quà tặng, ơn nghĩa, quan hệ trên dưới' },
+    { lesson: 42, title: 'お金を ためておきます', grammar: 'V る ために(mục đích)、N の ために、V のに(dùng cho)、V のに(cần thiết)', vocab: 'Mục đích, chuẩn bị, tiết kiệm, công cụ' },
+    { lesson: 43, title: 'そうですね', grammar: 'V そうです(dáng vẻ/sắp xảy ra)、Adj そうです、V て きます(đi rồi về)', vocab: 'Phỏng đoán từ ngoại hình, thời tiết, nấu ăn' },
+    { lesson: 44, title: 'ちょっと 使いすぎですよ', grammar: 'V すぎます(quá mức)、Adj すぎます、V やすい/にくい(dễ/khó)', vocab: 'Quá mức, đánh giá đồ vật, tính chất hành động' },
+    { lesson: 45, title: '大事な ものが あったら どう しますか', grammar: '〜場合は(trong trường hợp)、V ても/Adj ても(dù cho)、V の に', vocab: 'Tình huống, thiên tai, phòng bị, an toàn' },
+    { lesson: 46, title: 'もう 届いたはずなんですが…', grammar: '〜ところです(vừa/đang/sắp)、V たばかりです(vừa mới)、〜はずです(chắc hẳn)', vocab: 'Giai đoạn hành động, bưu phẩm, xác nhận' },
+    { lesson: 47, title: '周りが 静か だそうです', grammar: '〜そうです(nghe nói/truyền đạt)、〜ようです(có vẻ/hình như)、〜みたいです', vocab: 'Tin tức, tin đồn, phỏng đoán, suy luận' },
+    { lesson: 48, title: '一人で 遊園地に 行かせるんですか', grammar: '使役: V させます(sai/cho phép làm)、V させて ください、V させて いただけませんか', vocab: 'Nuôi dạy con, sai bảo, xin phép, công việc' },
+    { lesson: 49, title: '日ごろの ストレスが たまって…', grammar: 'Kính ngữ I(尊敬語): お V に なります、特別尊敬動詞(いらっしゃる・おっしゃる)', vocab: 'Kính ngữ, công sở, giao tiếp lịch sự' },
+    { lesson: 50, title: '心から 感謝いたします', grammar: 'Khiêm nhường(謙譲語): お V します、特別謙譲動詞(参る・申す・いたす)', vocab: 'Khiêm nhường ngữ, thư từ, phát biểu, nghi thức' },
   ],
   N3: [
-    { lesson: 1, title: '受身形（られる）', grammar: '受身形：N に V られる', vocab: 'Câu bị động, sự việc xảy ra với ai' },
-    { lesson: 2, title: '使役形（させる）', grammar: '使役形：N を V させる', vocab: 'Sai bảo, cho phép, buộc phải làm' },
-    { lesson: 3, title: '使役受身形', grammar: '使役受身: V させられる', vocab: 'Bị bắt phải làm, ép buộc' },
-    { lesson: 4, title: '自動詞・他動詞', grammar: '自他動詞の区別 (壊れる vs 壊す)', vocab: 'Cặp tự/tha động từ, biến đổi trạng thái' },
-    { lesson: 5, title: '〜という（伝聞・定義）', grammar: '〜という N, 〜ということだ', vocab: 'Tên gọi, định nghĩa, tin tức' },
-    { lesson: 6, title: '〜ようだ・〜らしい・〜そうだ', grammar: 'Suy đoán: ようだ／らしい／そうだ', vocab: 'Quan sát, suy đoán, phỏng đoán' },
-    { lesson: 7, title: '〜でしょう・〜だろう', grammar: '〜でしょう／〜だろう (dự đoán)', vocab: 'Thời tiết, tương lai, khả năng' },
-    { lesson: 8, title: '〜はずだ・〜はずがない', grammar: '〜はずだ (kỳ vọng logic)', vocab: 'Lý luận, mong đợi, sự thật' },
-    { lesson: 9, title: '〜わけだ・〜わけがない', grammar: '〜わけだ (lý do đương nhiên)', vocab: 'Giải thích, nguyên nhân, kết luận' },
-    { lesson: 10, title: '〜ために（目的・原因）', grammar: '〜ために (mục đích) vs (nguyên nhân)', vocab: 'Mục tiêu, lý do, hậu quả' },
-    { lesson: 11, title: '〜ながら・〜つつ', grammar: '〜ながら (đồng thời), 〜つつ (văn viết)', vocab: 'Làm nhiều việc cùng lúc' },
-    { lesson: 12, title: '〜し（列挙・理由）', grammar: '〜し〜し (liệt kê lý do)', vocab: 'Liệt kê nhiều lý do' },
-    { lesson: 13, title: '〜ても・〜でも（逆接）', grammar: '〜ても (dù cho), 〜でも', vocab: 'Nhượng bộ, dù thế nào' },
-    { lesson: 14, title: '〜のに（逆接・不満）', grammar: '〜のに (dù vậy mà, bất mãn)', vocab: 'Mâu thuẫn, bất mãn, ngạc nhiên' },
-    { lesson: 15, title: '〜ばかり・〜だけ・〜しか', grammar: 'Giới hạn: ばかり／だけ／しか〜ない', vocab: 'Giới hạn, số lượng, ăn uống' },
-    { lesson: 16, title: 'まま・まま(だ)', grammar: '〜まま (để nguyên trạng thái)', vocab: 'Trạng thái giữ nguyên, lơ là' },
-    { lesson: 17, title: '〜てしまう・〜ちゃう', grammar: '〜てしまう (hoàn thành/hối tiếc)', vocab: 'Hành động không mong muốn, hối hận' },
-    { lesson: 18, title: '〜ことにする・〜ことになる', grammar: '〜ことにする (quyết định), ことになる (kết quả)', vocab: 'Quyết định, thay đổi quy tắc' },
-    { lesson: 19, title: '〜ようにする・〜ようになる', grammar: '〜ようにする (cố gắng), ようになる (thay đổi)', vocab: 'Thói quen, thay đổi hành vi' },
-    { lesson: 20, title: '〜てみる・〜てみせる', grammar: '〜てみる (thử làm)', vocab: 'Thử nghiệm, chứng minh' },
+    // ── Ngữ pháp trung cấp (N3 tổng hợp) ──
+    { lesson: 1, title: '受身形（受動態）', grammar: '受身形：N に V られる、間接受身、持ち主の受身', vocab: 'Câu bị động, sự việc xảy ra với ai, bị ảnh hưởng' },
+    { lesson: 2, title: '使役形', grammar: '使役形：V させる、N に/を V させる', vocab: 'Sai bảo, cho phép, nuôi dạy con' },
+    { lesson: 3, title: '使役受身形', grammar: '使役受身: V させられる、N に V させられる', vocab: 'Bị bắt phải làm, ép buộc, kỷ niệm' },
+    { lesson: 4, title: '自動詞・他動詞', grammar: '自他動詞の区別: 開く/開ける、壊れる/壊す、消える/消す', vocab: 'Cặp tự/tha động từ, biến đổi trạng thái' },
+    { lesson: 5, title: '〜という（定義・伝聞）', grammar: '〜という N、〜ということだ、〜って', vocab: 'Tên gọi, định nghĩa, tin tức, trích dẫn' },
+    { lesson: 6, title: '〜ようだ・〜らしい', grammar: '〜ようだ(có vẻ)、〜らしい(nghe nói/đặc trưng)、〜みたいだ', vocab: 'Suy đoán, phỏng đoán, quan sát' },
+    { lesson: 7, title: '〜はずだ・〜わけだ', grammar: '〜はずだ(kỳ vọng logic)、〜はずがない、〜わけだ(đương nhiên)', vocab: 'Lý luận, mong đợi, kết luận, giải thích' },
+    { lesson: 8, title: '〜ために・〜ように', grammar: '〜ために(mục đích/nguyên nhân)、〜ように(hướng tới)、〜ようにする', vocab: 'Mục tiêu, lý do, cố gắng, hậu quả' },
+    { lesson: 9, title: '〜ながら・〜つつ', grammar: '〜ながら(đồng thời)、〜つつ(văn viết)、〜つつある(đang tiến triển)', vocab: 'Làm nhiều việc cùng lúc, xã hội, thay đổi' },
+    { lesson: 10, title: '〜ても・〜のに', grammar: '〜ても(dù cho)、〜のに(dù vậy mà/bất mãn)、〜にもかかわらず', vocab: 'Nhượng bộ, bất mãn, ngạc nhiên, mâu thuẫn' },
+    { lesson: 11, title: '〜ばかり・〜だけ・〜しか', grammar: '〜ばかり(toàn/vừa mới)、〜だけ(chỉ)、〜しか〜ない(chỉ có)、〜ほど', vocab: 'Giới hạn, số lượng, mức độ, so sánh' },
+    { lesson: 12, title: '〜まま・〜っぱなし', grammar: '〜まま(để nguyên trạng thái)、〜っぱなし(để mặc)、〜きる/〜きれない', vocab: 'Trạng thái, lơ là, hoàn thành, không thể hoàn thành' },
+    { lesson: 13, title: '〜ことにする・〜ことになる', grammar: '〜ことにする(quyết định)、〜ことになる(kết quả/quy định)、〜ことになっている', vocab: 'Quyết định, quy tắc, thay đổi, công ty' },
+    { lesson: 14, title: '〜ようにする・〜ようになる', grammar: '〜ようにする(cố gắng)、〜ようになる(trở nên có thể)、〜なくなる', vocab: 'Thói quen, thay đổi khả năng, rèn luyện sức khỏe' },
+    { lesson: 15, title: '〜てある・〜ておく・〜てしまう', grammar: '〜てある(kết quả tồn tại)、〜ておく(chuẩn bị/để yên)、〜てしまう(tiếc nuối/hoàn thành)', vocab: 'Chuẩn bị, tiếc nuối, hoàn thành, sự kiện' },
+    { lesson: 16, title: '〜し・〜上に・〜だけでなく', grammar: '〜し〜し(liệt kê lý do)、〜上に(thêm vào đó)、〜だけでなく〜も', vocab: 'Liệt kê, bổ sung, đánh giá, quảng cáo' },
+    { lesson: 17, title: '〜て初めて・〜たとたん', grammar: '〜て初めて(lần đầu nhận ra)、〜たとたん(vừa mới thì)、〜次第', vocab: 'Trải nghiệm mới, sự kiện bất ngờ, thứ tự' },
+    { lesson: 18, title: '〜において・〜に関して', grammar: '〜において(tại/trong lĩnh vực)、〜に関して(liên quan đến)、〜について', vocab: 'Nghiên cứu, báo cáo, văn viết trang trọng' },
+    { lesson: 19, title: '〜による・〜によって', grammar: '〜によると(theo nguồn)、〜によって(tùy theo/bằng cách)、〜に対して', vocab: 'Nguồn thông tin, phương pháp, so sánh đối lập' },
+    { lesson: 20, title: '〜べきだ・〜ものだ', grammar: '〜べきだ(nên/phải)、〜ものだ(đương nhiên/hoài niệm)、〜わけにはいかない', vocab: 'Bổn phận, hoài niệm, quy tắc xã hội, đạo đức' },
   ]
 };
 
