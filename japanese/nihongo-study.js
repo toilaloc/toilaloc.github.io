@@ -51,7 +51,13 @@ async function sbGet() {
 
 async function sbAdd(data) {
   if (!currentUser) throw new Error('Cần đăng nhập để lưu thẻ');
-  data.user_id = currentUser.id;
+  
+  if (Array.isArray(data)) {
+    data.forEach(item => item.user_id = currentUser.id);
+  } else {
+    data.user_id = currentUser.id;
+  }
+  
   const r = await fetch(`${SB_URL}/rest/v1/flashcards`, {
     method: 'POST',
     headers: { ...SB_H, 'Prefer': 'return=representation' },
