@@ -27,9 +27,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Inject Secrets into JavaScript
+      - name: Create Config File
         run: |
-          sed -i "s|__GROQ_KEY__|${{ secrets.GROQ_KEY }}|g" japanese/nihongo-study.js
+          echo "const ENV = { GROQ_KEY: '${{ secrets.GROQ_KEY }}' };" > japanese/config.js
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
