@@ -2512,6 +2512,33 @@ select:focus {
   height: 80%;
 }
 
+.btn-kanji {
+  font-family: 'Noto Serif JP', serif;
+  font-size: 22px;
+  padding: 6px 14px;
+  background: #F7F5F0;
+  color: #3C2A1E;
+  border: 2px solid #E5E5E5;
+  border-bottom-width: 4px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.1s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-kanji:hover {
+  background: #EFEBDF;
+  border-color: #D3CAB5;
+  transform: translateY(-1px);
+}
+
+.btn-kanji:active {
+  transform: translateY(2px);
+  border-bottom-width: 2px;
+}
+
 /* Print CSS */
 @media print {
   body {

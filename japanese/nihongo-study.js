@@ -51,13 +51,13 @@ async function sbGet() {
 
 async function sbAdd(data) {
   if (!currentUser) throw new Error('Cần đăng nhập để lưu thẻ');
-  
+
   if (Array.isArray(data)) {
     data.forEach(item => item.user_id = currentUser.id);
   } else {
     data.user_id = currentUser.id;
   }
-  
+
   const r = await fetch(`${SB_URL}/rest/v1/flashcards`, {
     method: 'POST',
     headers: { ...SB_H, 'Prefer': 'return=representation' },
@@ -1877,9 +1877,9 @@ Chỉ in ra JSON, chữ không có nghĩa thì để mảng rỗng [] hoặc đi
 }
 
 const KANJI_LISTS = {
-  'N5': "一二三四五六七八九十百千万円日月中火水木金土本休語何年上下左右南北西東大小学高校先生語本男女人子友父母名目口手足見聞行来飲食買出入休書言読話買教朝昼夕夜間时分半今先週月年休毎何",
-  'N4': "会同事自社発者地業方新場員設立開手力問代明動京目通言理体田作用強公野思家多正安院心界教文元重近考画海売知道集別物使品計死特私始朝期色終建神落暗病打買歌送起転軽広洗急",
-  'N3': "政議民連対部合市内相信定回選米実関決全表戦経最調化当約首法性要制治務成期取都和機平加受続進数記初指権支産点報済活原共得解交資際査判査任断更確満落流態越局放"
+  'N5': "一二三四五六七八九十百千万円人女子学生年月日時分半今午前後毎週曜間上下中左右東西南北外名何語文字本休校友父母兄姉弟妹夫妻家車電駅社会員仕事店銀行病院部屋室所国地図山川田天気雨雪風空海花草犬魚虫目耳口手足力心体食飲見聞話読書行来入出立休買安高小大新古長短白黒赤青",
+  'N4': "不同町村市区道府県京寺神社公園場所近遠通道橋建物階段屋根庭海岸港湖島林森原岩石星光音声色茶黄緑暗明暑寒温冷熱重軽広狭太細強弱早遅多少悪良若古親切便利有名元気特別変簡単複雑危険安全必要以外以内以上以下首顔鼻歯毛背胸腹指皮血痛病医薬者死命泳走歩座起寝働使作持待思考知覚忘伝借貸習勉教問答返計算説調練試験題意味由理決定始終開閉集別選取捨止帰送配届呼泣笑怒喜悲驚困助願約束信注意用服着脱洗料理飯肉野菜果物牛豚鳥酒茶菓子塩砂糖朝昼夜夕方春夏秋冬去来昨明次回毎度番線発到着乗降転運旅泊客宿港空飛船荷列急普通特急席券現金代値料費税低両足都合当然結婚離婚愛恋夢希望",
+  'N3': "与並主久乏乳乾乱亡争互井亜享亭介他付令仲件任企伺位低住佐例供依価便係保信修倉個倍候借値側停健偶備傾働優元兄兆党入全共具典兼内再冒写冠冷処凡凶出刀刃列初判別利到制刷券刺刻則削前割創劇力功加助努労効勢勤勝募勉動務包化北医区十千午卒協単博印危即卵去参及友双反収叔取受叩号司各合吉同名后向否含吸呼命和員哲商問営器囲固国圧在地坂均型埋城域基堂報場塔塗増士変夏夕外多夜夢大天太夫央失奏契奥女好妻委姿婦婚嫌子字存季学宅宇守安完官宙定実客宣室宮害家容宿寄密富寒察寸寺対寿封専射将尊導小少就尺局居属層山岸峰島崩州工左巧巨差巻市布希席帯帰常幅干平年幸幻幼庁床底店府度座庫庭康延建弁式弓引強当形役彼往待律後徒得御復微心必応快念怒怖思急性怪恋恐恒恥恵悩悪悲情惑想意感愛態慣慢慮成我戦戯戸戻所才打払扱承技投折抜抱抵押招担拍拝拒拓拳指持振捕捜掛探接控推支改政故救敗教散敬数整敵文料断新方施旅族旗日旧旨早易星映春昨昭昼晴景暑暗暴曲更替最月有服期木未末本札机材村条来杯東松果枝柔査柱柳株根格案桜梅械棒森植業極楽様横権欠次欧欲歌止正武歩歯歴死残段殺母毎毒比毛民気水永汁求汗汚池決沈沖沙没河油治沿況泉泊法波泣注泰洋洗活派流浅浜浮浪海消涙液涼深混清減測港湖湯湾満漁漢演潔激火灯灰災炎点為無然焼煙照熱燃爆父片版牙牛牧物特犬犯状独狭猫献玉王現球理生産用田由申男町画界畑留番異疑病痛登白的皇皮皿益盛盟目直相省看県真眼知短石砂研破確示礼社祖祝神票禁福科秒秋秘移程税種究空突窓立章童競竹笑笛第等筆答箱管節約紅純紙級細終組経結給統絵絶続緑線編締缶罪置罰美羊羽翌習老考者耳職肉肌肩背胃胸能脂脳腹腕腰臓臣自至興舌舎航船良色花芸芽若苦英茶草荷菜華落葉著蒸薬血行術街衣表裏製複西要見規視覚親観角解言計討訓記訪設許訳詞試話話認誘語誤説読課調談論講謝識警議譲谷豆豊貝負財責貯買貸費貿賀資賛質赤走起超越趣足距路跳身軍転軽較輪辞農辺近返追退送逃逆通速進遅遇遊運過道達違遠適選遺郵部都配酒酸里重野量金針鉄銀銭録鏡長門開閉間関防限院除険陽階際障隠隣隻雄雑離難雨雪雲零雷電青静非面革音順預頭題額顔願類風飛食飯飲館首馬駅験高髪鳥鳴麦黄黒"
 };
 
 function showKanjiList(level) {
@@ -1887,25 +1887,74 @@ function showKanjiList(level) {
   const picker = document.getElementById("kanjiPicker");
   picker.innerHTML = "";
   picker.style.display = "flex";
+  picker.style.flexDirection = "column";
+  picker.style.flexWrap = "nowrap";
+  picker.style.gap = "0";
+  picker.style.maxHeight = "340px";
+  picker.style.overflow = "hidden";
+  picker.style.padding = "0";
 
-  const chars = Array.from(new Set(list.split('')));
+  // create search box
+  const searchWrap = document.createElement("div");
+  searchWrap.style.marginBottom = "8px";
+  searchWrap.style.display = "flex";
+  searchWrap.style.background = "#fff";
+  searchWrap.style.padding = "12px 12px 4px 12px";
+
+  const searchInp = document.createElement("input");
+  searchInp.type = "text";
+  searchInp.placeholder = `🔍 Tìm Kanji ${level}...`;
+  searchInp.style.flex = "1";
+  searchInp.style.padding = "6px 12px";
+  searchInp.style.border = "1px solid var(--br)";
+  searchInp.style.borderRadius = "6px";
+  searchInp.style.fontFamily = "inherit";
+  searchInp.style.fontSize = "14px";
+  searchInp.style.outline = "none";
+  searchWrap.appendChild(searchInp);
+
+  const filterWrap = document.createElement("div");
+  filterWrap.style.display = "flex";
+  filterWrap.style.flexWrap = "wrap";
+  filterWrap.style.gap = "8px"; 
+  filterWrap.style.overflowY = "auto";
+  filterWrap.style.padding = "0 12px 12px 12px";
+  filterWrap.style.flex = "1";
+  filterWrap.style.minHeight = "0";
+
+  picker.appendChild(searchWrap);
+  picker.appendChild(filterWrap);
+
+  const chars = Array.from(new Set(list.replace(/\s+/g, '').split('')));
+  const btnEls = [];
+
   chars.forEach(ch => {
     const btn = document.createElement("button");
-    btn.className = "btn btn-sm";
-    btn.style.fontFamily = "'Noto Serif JP', serif";
-    btn.style.fontSize = "16px";
-    btn.style.padding = "4px 8px";
-    btn.style.background = "#F7F7F7";
-    btn.style.color = "#333";
-    btn.style.border = "1px solid #CCC";
+    btn.className = "btn-kanji";
     btn.textContent = ch;
+
+    const name = getCharName(ch) || ch;
+    btn.title = name;
+
     btn.onclick = () => {
       const inp = document.getElementById("sheetInput");
       if (!inp.value.includes(ch)) {
         inp.value += ch;
       }
     };
-    picker.appendChild(btn);
+    filterWrap.appendChild(btn);
+    btnEls.push({ ch: ch, name: name.toLowerCase(), el: btn });
+  });
+
+  searchInp.addEventListener("input", (e) => {
+    const q = e.target.value.toLowerCase().trim();
+    btnEls.forEach(item => {
+      if (!q || item.ch.includes(q) || item.name.includes(q)) {
+        item.el.style.display = "inline-block";
+      } else {
+        item.el.style.display = "none";
+      }
+    });
   });
 }
 
