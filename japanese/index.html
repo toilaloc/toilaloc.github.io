@@ -52,6 +52,7 @@
   <button class="nav-btn active" onclick="switchTab('flashcard')">🃏 Flashcard</button>
   <button class="nav-btn" onclick="switchTab('import')">📄 Giải bài tập</button>
   <button class="nav-btn" onclick="switchTab('draw')">✍️ Viết tay</button>
+  <button class="nav-btn" onclick="switchTab('course')">📚 Ôn luyện từ vựng</button>
   <button class="nav-btn" onclick="switchTab('practice')">📝 Luyện tập</button>
   <button class="nav-btn" onclick="switchTab('sheet')">🖨️ Tạo vở</button>
 </nav>
@@ -67,6 +68,14 @@
       <div class="stat"><div class="stat-num" id="stOther">—</div><div class="stat-lbl">khác</div></div>
     </div>
 
+    <!-- SRS Stats -->
+    <div class="srs-stats-row" id="srsStatsRow">
+      <div class="srs-stat"><div class="srs-stat-num" id="srsNew">0</div><div class="srs-stat-lbl">🆕 Mới</div></div>
+      <div class="srs-stat"><div class="srs-stat-num" id="srsLearning">0</div><div class="srs-stat-lbl">📖 Đang học</div></div>
+      <div class="srs-stat"><div class="srs-stat-num" id="srsReview">0</div><div class="srs-stat-lbl">🔄 Ôn tập</div></div>
+      <div class="srs-stat"><div class="srs-stat-num" id="srsMastered">0</div><div class="srs-stat-lbl">✅ Thành thạo</div></div>
+    </div>
+
     <div class="lbl">thêm thẻ mới</div>
     <div class="input-row">
       <input type="text" id="inpJP"   placeholder="日本語"/>
@@ -78,6 +87,7 @@
 
     <div style="display:flex;gap:8px;margin-bottom:1.25rem;flex-wrap:wrap;">
       <button class="btn" onclick="toggleStudy()" id="studyBtn">▶ Study Mode</button>
+      <span class="srs-due-badge no-due" id="srsDueBadge" onclick="startSRSReview()" title="Ôn SRS">✅ Đã ôn xong</span>
       <button class="btn" onclick="toggleAIGen()" id="aiGenBtn">✦ AI tạo thẻ</button>
       <div style="margin-left:auto;display:flex;gap:6px;">
         <button class="btn btn-sm btn-ghost" onclick="loadCards()">↻ Sync</button>
@@ -93,6 +103,16 @@
         <div class="s-jp"  id="sJP">—</div>
         <div class="s-rom" id="sRom"></div>
         <div class="s-mean" id="sMean"></div>
+        <div class="study-tts-row">
+          <button class="tts-btn" onclick="speakJP(document.getElementById('sJP').textContent,this)" title="Nghe phát âm">🔊</button>
+        </div>
+      </div>
+      <!-- SRS Difficulty Buttons (shown after flip) -->
+      <div class="srs-buttons" id="srsButtons" style="display:none;">
+        <button class="srs-btn srs-btn-again" onclick="rateSRS(0)">🔴 Quên <span class="srs-interval" id="srsInt0"></span></button>
+        <button class="srs-btn srs-btn-hard" onclick="rateSRS(1)">🟠 Khó <span class="srs-interval" id="srsInt1"></span></button>
+        <button class="srs-btn srs-btn-good" onclick="rateSRS(2)">🟢 Ổn <span class="srs-interval" id="srsInt2"></span></button>
+        <button class="srs-btn srs-btn-easy" onclick="rateSRS(3)">🔵 Dễ <span class="srs-interval" id="srsInt3"></span></button>
       </div>
       <div class="study-nav">
         <button class="btn" onclick="prevCard()">← Trước</button>
@@ -118,6 +138,16 @@
     </div>
 
     <div class="lbl">bộ thẻ <span id="cardCountLbl" style="color:var(--muted);">(0)</span></div>
+    <!-- Search / Filter -->
+    <div class="search-filter-bar" id="searchFilterBar">
+      <div class="search-input-wrap">
+        <input type="text" class="search-input" id="cardSearch" placeholder="Tìm kiếm flashcard (JP / romaji / nghĩa)..." oninput="filterCards()" />
+      </div>
+      <div class="filter-pills" id="filterPills">
+        <!-- Filled by JS -->
+      </div>
+    </div>
+    <div class="search-result-info" id="searchResultInfo" style="display:none;"></div>
     <div class="card-grid" id="cardGrid"></div>
     <div class="empty" id="emptyState">
       <div class="empty-icon">📭</div>
@@ -179,62 +209,67 @@
         <button class="btn btn-sm btn-red" onclick="recognizeAI()">✦ Nhận dạng ↗</button>
         <button class="btn btn-sm" onclick="toggleGrid()" id="gridBtn">格子 ON</button>
       </div>
-      <div class="canvas-wrap" id="canvasWrap">
-        <svg id="gridSVG" xmlns="http://www.w3.org/2000/svg"></svg>
-        <canvas id="drawCanvas" height="320"></canvas>
+
+      <div class="draw-workspace" style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;">
+        <!-- Canvas side -->
+        <div style="flex: 1; min-width: 250px;">
+          <div class="canvas-wrap" id="canvasWrap">
+            <svg id="gridSVG" xmlns="http://www.w3.org/2000/svg"></svg>
+            <canvas id="drawCanvas" height="320"></canvas>
+          </div>
+        </div>
+        
+        <!-- Stroke order side -->
+        <div style="flex: 1; min-width: 250px;">
+          <div class="lbl" style="margin-bottom: 8px;">thứ tự nét <span style="color:var(--faint);font-size:10px;">(bấm vào chữ mẫu để xem)</span></div>
+          <div class="stroke-order-box" id="strokeOrderBox">
+            <div class="stroke-order-placeholder" id="strokeOrderPlaceholder">
+              <span>選択</span>
+              <p>Chọn một chữ mẫu bên dưới để xem thứ tự nét</p>
+            </div>
+            <div id="strokeOrderContent" style="display:none;">
+              <div class="stroke-order-char-display">
+                <div class="soc-char" id="socChar">—</div>
+                <div class="soc-info">
+                  <div class="soc-name" id="socName">—</div>
+                  <div class="soc-count" id="socCount">— nét</div>
+                </div>
+              </div>
+              <div class="stroke-steps-wrap" id="strokeStepsWrap"></div>
+              <div class="stroke-anim-wrap">
+                <div id="strokeAnimTarget" style="width:200px;height:200px;border:2px solid var(--br);border-radius:12px;background:#F7F5F0;"></div>
+                <div class="stroke-anim-controls">
+                  <button class="btn btn-sm" id="strokePlayBtn" onclick="playStrokeAnim()">▶ Xem animation</button>
+                  <button class="btn btn-sm btn-ghost" onclick="resetStrokeAnim()">↺ Reset</button>
+                  <span class="stroke-anim-label" id="strokeAnimLabel"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
+
+      <!-- Character picker for practice -->
       <div>
         <div class="lbl">chữ mẫu</div>
-        <div class="char-pills">
-          <span class="char-pill" onclick="setPractice(this,'あ')">あ</span>
-          <span class="char-pill" onclick="setPractice(this,'い')">い</span>
-          <span class="char-pill" onclick="setPractice(this,'う')">う</span>
-          <span class="char-pill" onclick="setPractice(this,'え')">え</span>
-          <span class="char-pill" onclick="setPractice(this,'お')">お</span>
-          <span class="char-pill" onclick="setPractice(this,'か')">か</span>
-          <span class="char-pill" onclick="setPractice(this,'日')">日</span>
-          <span class="char-pill" onclick="setPractice(this,'本')">本</span>
-          <span class="char-pill" onclick="setPractice(this,'語')">語</span>
-          <span class="char-pill" onclick="setPractice(this,'愛')">愛</span>
-          <span class="char-pill" onclick="setPractice(this,'山')">山</span>
-          <span class="char-pill" onclick="setPractice(this,'水')">水</span>
+        <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center;">
+          <button class="btn btn-sm" onclick="showDrawCharList('hiragana')" id="dcbtn-hira">あ Hiragana</button>
+          <button class="btn btn-sm" onclick="showDrawCharList('katakana')" id="dcbtn-kata">ア Katakana</button>
+          <button class="btn btn-sm" onclick="showDrawCharList('N5')" id="dcbtn-N5">Kanji N5</button>
+          <button class="btn btn-sm" onclick="showDrawCharList('N4')" id="dcbtn-N4">Kanji N4</button>
+          <button class="btn btn-sm" onclick="showDrawCharList('N3')" id="dcbtn-N3">Kanji N3</button>
+          <button class="btn btn-sm btn-ghost" onclick="closeDrawCharList()" style="font-size:11px;">Đóng</button>
           <span style="color:var(--faint);font-size:14px;margin:0 4px;">│</span>
           <input type="text" id="customChar" maxlength="1" style="width:48px;height:38px;text-align:center;font-family:'Noto Serif JP',serif;font-size:20px;padding:0;border:2px solid var(--br);border-radius:10px;outline:none;background:#fff;transition:border-color 0.15s;" placeholder="字" onfocus="this.style.borderColor='var(--green)'" onblur="this.style.borderColor='var(--br)'" onkeydown="if(event.key==='Enter'){setPractice(null,this.value.trim());this.blur();}"/>
           <button class="btn btn-sm btn-green" onclick="setPractice(null,document.getElementById('customChar').value.trim())" style="font-size:12px;">Xem nét</button>
+        </div>
+        <div id="drawCharPicker" style="display:none;margin-bottom:1rem;padding:0;background:#fff;border-radius:10px;border:2px solid var(--br);max-height:320px;overflow:hidden;flex-direction:column;">
+          <!-- Filled by JS: search box + scrollable grid -->
         </div>
       </div>
       <div>
         <div class="lbl">kết quả nhận dạng</div>
         <div class="draw-result" id="drawResult">Vẽ một chữ Hán/Kana rồi nhấn <strong>✦ Nhận dạng</strong></div>
-      </div>
-
-      <!-- Stroke Order -->
-      <div>
-        <div class="lbl">thứ tự nét <span style="color:var(--faint);font-size:10px;">(bấm vào chữ mẫu để xem)</span></div>
-        <div class="stroke-order-box" id="strokeOrderBox">
-          <div class="stroke-order-placeholder" id="strokeOrderPlaceholder">
-            <span>選択</span>
-            <p>Chọn một chữ mẫu bên trên để xem thứ tự nét</p>
-          </div>
-          <div id="strokeOrderContent" style="display:none;">
-            <div class="stroke-order-char-display">
-              <div class="soc-char" id="socChar">—</div>
-              <div class="soc-info">
-                <div class="soc-name" id="socName">—</div>
-                <div class="soc-count" id="socCount">— nét</div>
-              </div>
-            </div>
-            <div class="stroke-steps-wrap" id="strokeStepsWrap"></div>
-            <div class="stroke-anim-wrap">
-              <div id="strokeAnimTarget" style="width:200px;height:200px;border:2px solid #E5E5E5;border-radius:12px;background:#F7F5F0;"></div>
-              <div class="stroke-anim-controls">
-                <button class="btn btn-sm" id="strokePlayBtn" onclick="playStrokeAnim()">▶ Xem animation</button>
-                <button class="btn btn-sm btn-ghost" onclick="resetStrokeAnim()">↺ Reset</button>
-                <span class="stroke-anim-label" id="strokeAnimLabel"></span>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   </div>
@@ -437,10 +472,56 @@
     </div>
   </div>
 
+  <!-- ── COURSE (HỌC BÀI) ── -->
+  <div class="panel" id="panel-course">
+    <div class="lbl">Ôn luyện từ vựng theo giáo trình Minna no Nihongo</div>
+    
+    <div style="display:flex;gap:8px;margin-bottom:1rem;flex-wrap:wrap;">
+      <button class="btn btn-sm" onclick="showCourseLessons('N5')" id="cbtn-N5">N5</button>
+      <button class="btn btn-sm" onclick="showCourseLessons('N4')" id="cbtn-N4">N4</button>
+      <button class="btn btn-sm" onclick="showCourseLessons('N3')" id="cbtn-N3" disabled>N3 (Sắp có)</button>
+    </div>
+
+    <!-- Lesson Piker -->
+    <div id="coursePicker" style="display:none;margin-bottom:1.5rem;padding:12px;background:#fff;border-radius:10px;border:2px solid var(--br);flex-wrap:wrap;gap:8px;">
+    </div>
+    
+    <!-- Inline Study Mode for Course -->
+    <div id="courseStudyWrap" style="display:none;background:var(--bg2);padding:16px;border-radius:16px;border:2px solid var(--br2);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div class="lbl" id="courseStudyLbl" style="margin:0;">đang học</div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm" id="courseShuffleBtn" onclick="shuffleCourseCards()">🔀 Trộn</button>
+          <button class="btn btn-sm btn-ghost" onclick="closeCourseStudy()">✕ Thoát</button>
+        </div>
+      </div>
+      
+      <div class="progress-bar"><div class="progress-fill" id="cProgFill"></div></div>
+      <div class="study-card" id="courseCardEl" onclick="revealCourseCard()">
+        <div class="s-jp"  id="csJP">—</div>
+        <div class="s-rom" id="csKana" style="color:#e74c3c; font-size:1.5rem; margin-top:5px; font-weight:bold;"></div>
+        <div class="s-rom" id="csRom"></div>
+        <div class="s-mean" id="csMean"></div>
+        <div class="study-tts-row">
+          <button class="tts-btn" onclick="event.stopPropagation(); speakJP(document.getElementById('csJP').textContent,this)" title="Nghe phát âm">🔊</button>
+        </div>
+      </div>
+      <div class="study-nav" style="margin-top:16px;">
+        <button class="btn" onclick="prevCourseCard()">← Trước</button>
+        <span class="study-counter" id="courseCtr" style="flex:1;">1 / 1</span>
+        <button class="btn" onclick="nextCourseCard()">Tiếp →</button>
+      </div>
+      <div style="text-align:center;margin-top:10px;font-size:11px;color:var(--faint);font-family:'Nunito',sans-serif;font-weight:600;">
+        ⌨️ Space/Enter: lật thẻ &nbsp;|&nbsp; ←→: chuyển thẻ
+      </div>
+    </div>
+  </div>
+
 </main>
 
 <div class="toast" id="toast"></div>
 
+<script src="vocab-data.js"></script>
 <script src="nihongo-study.js"></script>
 
 <!--

@@ -23,6 +23,14 @@ let brushSize = 4, brushColor = '#181816';
 let drawing = false, lx = 0, ly = 0;
 let showGrid = true, practiceChar = '';
 
+// Search/Filter state
+let activeFilter = 'all';
+let searchQuery = '';
+let cardShowAll = false;
+
+// SRS state
+let srsData = {}; // { cardId: { ease, interval, repetitions, nextReview, lastReview } }
+
 // Auth state
 let currentUser = null; // { id, email, name }
 
@@ -244,23 +252,73 @@ function renderCards() {
   document.getElementById('stOther').textContent = cards.filter(c => c.tag && c.tag !== 'N5' && c.tag !== 'N4').length;
   document.getElementById('cardCountLbl').textContent = `(${cards.length})`;
 
-  if (!cards.length) { grid.innerHTML = ''; empty.style.display = 'block'; return; }
+  // Build filter pills
+  buildFilterPills();
+  // Update SRS stats
+  updateSRSStats();
+
+  // Show/hide search bar: only when > 10 cards
+  const searchBar = document.getElementById('searchFilterBar');
+  if (searchBar) searchBar.style.display = cards.length > 10 ? 'flex' : 'none';
+
+  // Apply search + filter
+  const filtered = getFilteredCards();
+  const info = document.getElementById('searchResultInfo');
+  const isSearching = searchQuery || activeFilter !== 'all';
+
+  if (!cards.length) { grid.innerHTML = ''; empty.style.display = 'block'; info.style.display = 'none'; return; }
   empty.style.display = 'none';
 
-  grid.innerHTML = cards.map((c, i) => `
+  // Limit display: 10 cards at a time (unless searching/filtering or user clicked "show more")
+  const CARD_LIMIT = 10;
+  const showAll = isSearching || cardShowAll;
+  const toShow = showAll ? filtered : filtered.slice(0, CARD_LIMIT);
+  const hasMore = !showAll && filtered.length > CARD_LIMIT;
+
+  if (isSearching && filtered.length < cards.length) {
+    info.style.display = 'block';
+    info.textContent = `Hiển thị ${filtered.length} / ${cards.length} thẻ`;
+  } else if (hasMore) {
+    info.style.display = 'block';
+    info.textContent = `Hiển thị ${toShow.length} / ${filtered.length} thẻ`;
+  } else {
+    info.style.display = 'none';
+  }
+
+  grid.innerHTML = toShow.map(({ card: c, origIdx: i }) => {
+    const srs = getSRSData(c.id);
+    const srsClass = getSRSStage(srs);
+    return `
     <div class="flash-card" id="fc${i}" onclick="flipCard(${i})">
       ${c.tag ? `<span class="fc-tag">${c.tag}</span>` : ''}
       <button class="fc-del" onclick="event.stopPropagation();delCard('${c.id}',${i})">✕</button>
+      <button class="tts-btn fc-tts" onclick="event.stopPropagation();speakJP('${c.jp.replace(/'/g, "\\'") }',this)" title="Nghe phát âm">🔊</button>
       <div class="fc-jp">${c.jp}</div>
       <div class="fc-rom">${c.rom || ''}</div>
       <div class="fc-mean">${c.mean}</div>
-    </div>`).join('');
+      <div class="fc-srs-dot ${srsClass}" title="${srsClass.replace('srs-','')}"></div>
+    </div>`;
+  }).join('');
+
+  // "Xem thêm" button
+  if (hasMore) {
+    grid.innerHTML += `
+    <div class="flash-card" style="background:var(--bg3);border-style:dashed;cursor:pointer;color:var(--muted);" onclick="showMoreCards()">
+      <div style="font-size:24px;margin-bottom:6px;">📃</div>
+      <div style="font-size:13px;font-weight:800;font-family:'Nunito',sans-serif;">Xem thêm ${filtered.length - CARD_LIMIT} thẻ</div>
+    </div>`;
+  }
 
   if (studyOn) updateStudyCard();
 }
 
 function flipCard(i) {
   document.getElementById('fc' + i).classList.toggle('flipped');
+}
+
+function showMoreCards() {
+  cardShowAll = true;
+  renderCards();
 }
 
 // ═══════════════════════════════════
@@ -344,9 +402,18 @@ function updateStudyCard() {
   document.getElementById('studyCardEl').classList.remove('revealed');
   document.getElementById('progFill').style.width = Math.round((studyIdx + 1) / studyOrder.length * 100) + '%';
   document.getElementById('studyCtr').textContent = `${studyIdx + 1} / ${studyOrder.length}`;
+  // Hide SRS buttons until card is revealed
+  document.getElementById('srsButtons').style.display = 'none';
 }
 
-function revealCard() { document.getElementById('studyCardEl').classList.add('revealed'); }
+function revealCard() {
+  document.getElementById('studyCardEl').classList.add('revealed');
+  // Show SRS buttons after reveal
+  const c = cards[studyOrder[studyIdx]];
+  if (c) {
+    showSRSButtons(c);
+  }
+}
 function nextCard() { if (!cards.length) return; studyIdx = (studyIdx + 1) % studyOrder.length; updateStudyCard(); }
 function prevCard() { if (!cards.length) return; studyIdx = (studyIdx - 1 + studyOrder.length) % studyOrder.length; updateStudyCard(); }
 function shuffleCards() { studyOrder.sort(() => Math.random() - 0.5); studyIdx = 0; updateStudyCard(); showToast('🔀 Đã xáo thứ tự'); }
@@ -595,7 +662,7 @@ async function groqChat(messages) {
       model: GROQ_MODEL,
       messages,
       temperature: 0.7,
-      max_tokens: 4000
+      max_tokens: 8192
     })
   });
   if (!r.ok) { const e = await r.text(); throw new Error(e); }
@@ -979,7 +1046,7 @@ function switchTab(t) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('panel-' + t).classList.add('active');
-  ['flashcard', 'import', 'draw', 'practice'].forEach((id, i) => {
+  ['flashcard', 'import', 'draw', 'course', 'practice', 'sheet'].forEach((id, i) => {
     if (id === t) document.querySelectorAll('.nav-btn')[i].classList.add('active');
   });
   // Re-init canvas after panel is visible so offsetWidth is correct
@@ -1042,7 +1109,7 @@ function selectType(el, tp) {
 
 // ── JLPT prompt templates per 問題 type ──
 // All prompts now request a "furigana" field: array of {kanji, reading} for kanji in question/options/passage
-const FURIGANA_RULE = `\n重要: 各問題に "furigana" フィールドを必ず追加してください。question・options・passage内の全ての漢字語に対し、[{"kanji":"漢字","reading":"かんじ"},...] の配列で振り仮名を付けてください。`;
+const FURIGANA_RULE = `\n重要: 各問題に "furigana" フィールドを必ず追加してください。question・options・passage内の全ての漢字語に対し、[{"kanji":"漢字","reading":"かんじ"},...] の配列で振り仮名を付けてください。\n\n【絶対厳守】question、options、passageは必ず日本語（漢字・ひらがな・カタカナ）で書くこと。ローマ字（romaji、例: watashi, taberu, desu等）は絶対に使用禁止。ローマ字で書いた問題は無効とする。explanationのみベトナム語で書くこと。`;
 
 const JLPT_PROMPTS = {
 
@@ -1050,71 +1117,79 @@ const JLPT_PROMPTS = {
 あなたは日本語能力試験（JLPT）${level}の問題作成者です。
 ${ctx}
 【問題1 漢字読み】の形式で${count}問作成してください。
-形式: 文中の___の漢字の読み方を①〜④から選ぶ。
+形式: 文中の【太字の漢字】の正しい読み方（ひらがな）を①〜④から選ぶ。
+重要: 必ず question の文字列の中に、対象の漢字を「【　】」で囲んでください。例: "毎朝、新聞を【読】みます。"
 
 JSONのみ返してください（markdownなし）:
-[{"type":"mondai1","question":"___の言葉の読み方は何ですか。例: 毎朝、新聞を（読み）ます。","target":"対象の漢字語","ruby":"","options":["①よみ","②かき","③みる","④はなし"],"answer":"①よみ","explanation":"「読み」はよみと読みます。動詞「読む」の連用形。","furigana":[{"kanji":"毎朝","reading":"まいあさ"},{"kanji":"新聞","reading":"しんぶん"},{"kanji":"読み","reading":"よみ"},{"kanji":"言葉","reading":"ことば"}]}]
+[{"type":"mondai1","question":"毎朝、新聞を【読】みます。","target":"読","ruby":"","options":["①よ","②か","③み","④はな"],"answer":"①よ","explanation":"「読」は「よ」と読みます。動詞「読む」の連用形。","furigana":[{"kanji":"毎朝","reading":"まいあさ"},{"kanji":"新聞","reading":"しんぶん"}]}]
 ルール: JLPT ${level}レベルの漢字のみ。optionsは読み方（ひらがな）のみ。JSONの文字列内に改行禁止。${count}問ちょうど。${FURIGANA_RULE}`,
 
   mondai2: (level, count, ctx) => `
 あなたはJLPT${level}問題作成者です。
 ${ctx}
 【問題2 表記】の形式で${count}問作成してください。
-形式: ひらがな/カタカナの語に対して正しい漢字表記を選ぶ。
+形式: 文中の【ひらがな/カタカナ】に対して正しい漢字表記を選ぶ。
+重要: 必ず question の文字列の中に、対象のひらがなを「【　】」で囲んでください。例: "まいにち 【べんきょう】しています。"
 
 JSONのみ返してください:
-[{"type":"mondai2","question":"___のことばはどう書きますか。例: まいにち　べんきょうしています。","target":"べんきょう","ruby":"","options":["①勉強","②便強","③文強","④文章"],"answer":"①勉強","explanation":"「べんきょう」は「勉強」と書きます。","furigana":[{"kanji":"勉強","reading":"べんきょう"},{"kanji":"便強","reading":"べんきょう"},{"kanji":"文強","reading":"ぶんきょう"},{"kanji":"文章","reading":"ぶんしょう"}]}]
+[{"type":"mondai2","question":"まいにち 【べんきょう】しています。","target":"べんきょう","ruby":"","options":["①勉強","②便強","③文強","④文章"],"answer":"①勉強","explanation":"「べんきょう」は「勉強」と書きます。","furigana":[]}]
 ルール: JLPT ${level}語彙範囲のみ。optionsは漢字表記。JSONの文字列内に改行禁止。${count}問ちょうど。${FURIGANA_RULE}`,
 
   mondai3: (level, count, ctx) => `
 あなたはJLPT${level}問題作成者です。
 ${ctx}
 【問題3 文脈規定】の形式で${count}問作成してください。
-形式: 文の（　）に入る最も適切な言葉を選ぶ。
+形式: 文の空欄（ ___ ）に入る最も適切な言葉を選ぶ。
+重要: 必ず question の文字列の中に、空欄を示す「（ ___ ）」を含めてください。例: "駅まで歩いて（ ___ ）分かかります。"
 
 JSONのみ返してください:
-[{"type":"mondai3","question":"（　）に入れるのに最もよいものを選んでください。\\n駅まで歩いて（　）分かかります。","ruby":"","options":["①だいたい","②すこし","③もっと","④まだ"],"answer":"①だいたい","explanation":"「だいたい〜分」で「おおよそ〜分」の意味。時間の大まかな見積もりに使う。","furigana":[{"kanji":"駅","reading":"えき"},{"kanji":"歩","reading":"ある"},{"kanji":"分","reading":"ぷん"}]}]
+[{"type":"mondai3","question":"駅まで歩いて（ ___ ）分かかります。","ruby":"","options":["①だいたい","②すこし","③もっと","④まだ"],"answer":"①だいたい","explanation":"「だいたい〜分」で「おおよそ〜分」の意味。時間の大まかな見積もりに使う。","furigana":[{"kanji":"駅","reading":"えき"},{"kanji":"歩","reading":"ある"},{"kanji":"分","reading":"ぷん"}]}]
 ルール: 4択。文脈で判断できる語彙問題。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。${FURIGANA_RULE}`,
 
   mondai4: (level, count, ctx) => `
 あなたはJLPT${level}問題作成者です。
 ${ctx}
 【問題4 言い換え類義語】の形式で${count}問作成してください。
-形式: ___の言葉に意味が最も近いものを選ぶ。
+形式: 文中の指定された言葉に意味が最も近いものを選ぶ。
+重要: 必ず question の文字列の中に、対象となる言葉を「【　】」で囲んでください。例: "彼はとても【たいせつ】なものをなくしました。"
 
 JSONのみ返してください:
-[{"type":"mondai4","question":"___の言葉に意味が最も近いものを選んでください。\\n彼はとても（たいせつ）なものをなくしました。","target":"たいせつ","ruby":"","options":["①大切","②重要","③必要","④特別"],"answer":"②重要","explanation":"「大切」と「重要」はほぼ同義。価値があって大事という意味。","furigana":[{"kanji":"言葉","reading":"ことば"},{"kanji":"意味","reading":"いみ"},{"kanji":"彼","reading":"かれ"},{"kanji":"大切","reading":"たいせつ"},{"kanji":"重要","reading":"じゅうよう"},{"kanji":"必要","reading":"ひつよう"},{"kanji":"特別","reading":"とくべつ"}]}]
+[{"type":"mondai4","question":"彼はとても【たいせつ】なものをなくしました。","target":"たいせつ","ruby":"","options":["①大切","②重要","③必要","④特別"],"answer":"②重要","explanation":"「たいせつ」と「重要」はほぼ同義。価値があって大事という意味。","furigana":[{"kanji":"彼","reading":"かれ"},{"kanji":"大切","reading":"たいせつ"},{"kanji":"重要","reading":"じゅうよう"},{"kanji":"必要","reading":"ひつよう"},{"kanji":"特別","reading":"とくべつ"}]}]
 ルール: ターゲット語と選択肢はすべて${level}レベル範囲。${count}問ちょうど。JSONの文字列内に改行禁止。${FURIGANA_RULE}`,
 
   mondai5: (level, count, ctx) => `
 あなたはJLPT${level}問題作成者です。
 ${ctx}
 【問題5 文法形式の判断】の形式で${count}問作成してください。
-形式: （　）に入る文法形式・助詞・接続詞を4択で選ぶ。実際のJLPT問題と同じ難易度。
+形式: 空欄（ ___ ）に入る文法形式・助詞・接続詞を4択で選ぶ。実際のJLPT問題と同じ難易度。
+重要: 必ず question の文字列の中に、空欄を示す「（ ___ ）」を含めてください。例: "病気（ ___ ）、学校を休みました。"
 
 JSONのみ返してください:
-[{"type":"mondai5","question":"（　）に入れるのに最もよいものを選んでください。\\n病気（　）、学校を休みました。","ruby":"","options":["①だから","②なので","③ので","④から"],"answer":"③ので","explanation":"「〜ので」は客観的な理由を述べる丁寧な表現。「〜から」より柔らかく書き言葉・話し言葉両方で使える。","furigana":[{"kanji":"病気","reading":"びょうき"},{"kanji":"学校","reading":"がっこう"},{"kanji":"休","reading":"やす"}]}]
+[{"type":"mondai5","question":"病気（ ___ ）、学校を休みました。","ruby":"","options":["①だから","②なので","③ので","④から"],"answer":"③ので","explanation":"「〜ので」は客観的な理由を述べる丁寧な表現。","furigana":[{"kanji":"病気","reading":"びょうき"},{"kanji":"学校","reading":"がっこう"},{"kanji":"休","reading":"やす"}]}]
 ルール: ${level}の文法項目のみ。Minna no Nihongo ${level}範囲に準拠。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。${FURIGANA_RULE}`,
 
   mondai6: (level, count, ctx) => `
 あなたはJLPT${level}問題作成者です。
 ${ctx}
 【問題6 文の組み立て（並べ替え）】の形式で${count}問作成してください。
-実際のJLPT問題と全く同じ形式: 4つの語句を並べ替えて文を作り、★の位置に来る語句を選ぶ。
+形式: 1つの日本語の文の一部を4つの語句に分割し、それを正しい順序に並べ替えて文を完成させる文法問題です（いわゆる「星（★）問題」）。
+重要: 必ず question の文字列の中に、空欄と★を「＿　＿　★　＿」のような形で含めてください。単なる手順の並べ替えではありません。1つの文を作ります。
+例: "昨日、駅の前の ＿　＿　★　＿ 買いました。"
 
 JSONのみ返してください:
-[{"type":"mondai6","question":"次の文の　★　に入る最もよいものを選んでください。\\n田中さんは　___　___　★　___　います。","ruby":"","scrambled":["①日本語を","②先生に","③教えて","④もらって"],"options":["①日本語を","②先生に","③教えて","④もらって"],"answer":"③教えて","correct_order":"②先生に①日本語を③教えて④もらって","explanation":"「先生に日本語を教えてもらっています」。★の位置は3番目→「教えて」。〜てもらう構文。","furigana":[{"kanji":"田中","reading":"たなか"},{"kanji":"日本語","reading":"にほんご"},{"kanji":"先生","reading":"せんせい"},{"kanji":"教","reading":"おし"}]}]
-ルール: scrambled と options は同じ4語句。answer は★の位置の語句。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。${FURIGANA_RULE}`,
+[{"type":"mondai6","question":"田中さんは ＿　＿　★　＿ います。","ruby":"","scrambled":["①日本語を","②先生に","③教えて","④もらって"],"options":["①日本語を","②先生に","③教えて","④もらって"],"answer":"③教えて","correct_order":"②先生に①日本語を③教えて④もらって","explanation":"正しい文は「田中さんは先生に日本語を教えてもらっています」です。★の位置（3番目）には「教えて」が入ります。","furigana":[{"kanji":"田中","reading":"たなか"},{"kanji":"日本語","reading":"にほんご"},{"kanji":"先生","reading":"せんせい"},{"kanji":"教","reading":"おし"}]}]
+ルール: scrambled と options は同じ4つの語句。"correct_order" は必ず文字列(String)で返すこと。配列は不可。answer は★の位置（3番目）の語句。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。${FURIGANA_RULE}`,
 
   mondai7: (level, count, ctx) => `
 あなたはJLPT${level}問題作成者です。
 ${ctx}
 【問題7 文章の文法】の形式で${count}セット作成してください。
-形式: 短い文章（3〜4文）に（1）〜（${count}）の空欄があり、それぞれに最適な文法形式を選ぶ。
+形式: 短い文章（3〜4文）に（ ___ 1 ）、（ ___ 2 ）のように空欄があり、それぞれに最適な文法形式を選ぶ。
 → 1セット = 1つの文章 + ${count}個の空欄問題として生成してください。
+重要: passage の中に必ず空欄を示す「（ ___ 1 ）」などを含めてください。
 
 JSONのみ返してください（各空欄を1問として配列に入れる）:
-[{"type":"mondai7","passage":"私は毎日電車（1）会社に行きます。家（2）駅まで15分（3）かかります。","question":"（1）に入れるのに最もよいものを選んでください。","ruby":"","options":["①で","②に","③を","④が"],"answer":"①で","explanation":"移動手段には助詞「で」を使う。「電車で行く」。","furigana":[{"kanji":"毎日","reading":"まいにち"},{"kanji":"電車","reading":"でんしゃ"},{"kanji":"会社","reading":"かいしゃ"},{"kanji":"家","reading":"いえ"},{"kanji":"駅","reading":"えき"}]}]
+[{"type":"mondai7","passage":"私は毎日電車（ ___ 1 ）会社に行きます。家（ ___ 2 ）駅まで15分かかります。","question":"（ ___ 1 ）に入れるのに最もよいものを選んでください。","ruby":"","options":["①で","②に","③を","④が"],"answer":"①で","explanation":"移動手段には助詞「で」を使う。「電車で行く」。","furigana":[{"kanji":"毎日","reading":"まいにち"},{"kanji":"電車","reading":"でんしゃ"},{"kanji":"会社","reading":"かいしゃ"},{"kanji":"家","reading":"いえ"},{"kanji":"駅","reading":"えき"}]}]
 ルール: 文章は自然な日本語。空欄ごとに1オブジェクト。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。${FURIGANA_RULE}`,
 
   mondai8: (level, count, ctx) => `
@@ -1132,6 +1207,10 @@ JSONのみ返してください:
 ${ctx}
 問題1〜8の中から均等に選んで、合計${count}問のJLPT形式問題を作成してください。
 各問題に type フィールドで種別を示してください（mondai1〜mondai8）。
+
+重要ルール:
+- question、options、passage内は必ず日本語（漢字・ひらがな・カタカナ）で書くこと。ローマ字（romaji）は絶対に使わないこと。
+- explanationはベトナム語で書くこと。
 
 JSONのみ返してください:
 [{"type":"mondai1|mondai2|mondai3|mondai4|mondai5|mondai6|mondai7|mondai8","question":"...","ruby":"","options":["①...","②...","③...","④..."],"answer":"①...","explanation":"...（ベトナム語で80語以内）","furigana":[{"kanji":"漢字語","reading":"ひらがな読み"}]}]
@@ -1162,6 +1241,10 @@ ${ctx}
 指定された問題形式（${requestedTypes}）の中から均等に選んで、合計${count}問のJLPT形式問題を作成してください。
 各問題に type フィールドで種別を示してください。（例: mondai1 等）
 
+重要ルール:
+- question、options、passage内は必ず日本語（漢字・ひらがな・カタカナ）で書くこと。ローマ字（romaji）は絶対に使わないこと。
+- explanationはベトナム語で書くこと。
+
 JSONのみ返してください:
 [{"type":"mondaiN","question":"...","ruby":"","options":["①...","②...","③...","④..."],"answer":"①...","explanation":"...（ベトナム語で80語以内）","furigana":[{"kanji":"漢字語","reading":"ひらがな読み"}]}]
 ルール: options は MCQ のみ。mondai6 は correct_order フィールドも追加。mondai7の場合は passage も含める。${count}問ちょうど。JSONの文字列内に改行禁止（\\nは使用可）。${FURIGANA_RULE}`;
@@ -1170,9 +1253,33 @@ JSONのみ返してください:
 // ── Parse AI JSON response helper ──
 function parseExerciseJSON(raw) {
   let clean = raw.replace(/```json|```/g, '').trim().replace(/\n/g, ' ');
-  const match = clean.match(/\[[\s\S]*\]/);
-  if (!match) throw new Error('Không parse được JSON từ AI');
-  return JSON.parse(match[0]);
+  // Auto-fix LLM hallucinations like unquoted circle numbers in arrays: [①, ②, ③, ④] -> ["①", "②", "③", "④"]
+  clean = clean.replace(/\[\s*([①②③④⑤⑥⑦⑧⑨⑩]+(?:\s*,\s*[①②③④⑤⑥⑦⑧⑨⑩]+)*)\s*\]/g, (match, content) => {
+    return '["' + content.split(',').map(s => s.trim()).join('","') + '"]';
+  });
+  // Use bracket-balanced extraction instead of greedy regex
+  const start = clean.indexOf('[');
+  if (start === -1) throw new Error('Không tìm thấy JSON array từ AI');
+  let depth = 0, end = -1;
+  for (let i = start; i < clean.length; i++) {
+    if (clean[i] === '[') depth++;
+    else if (clean[i] === ']') { depth--; if (depth === 0) { end = i; break; } }
+  }
+  if (end === -1) throw new Error('JSON array không hoàn chỉnh');
+  return JSON.parse(clean.substring(start, end + 1));
+}
+
+// ── Detect if text is primarily romaji (Latin) instead of Japanese ──
+function isRomaji(text) {
+  if (!text) return false;
+  // Strip out common non-language chars: numbers, punctuation, brackets, spaces, circle numbers
+  const stripped = text.replace(/[0-9①②③④⑤⑥⑦⑧⑨⑩\s\.\,\!\?\;\:\-\_\(\)（）「」【】＿★。、・\/\\]/g, '');
+  if (stripped.length === 0) return false;
+  // Count Latin alphabet chars vs Japanese chars (Hiragana + Katakana + CJK)
+  const latinChars = (stripped.match(/[a-zA-Zàáâãèéêìíòóôõùúýăđĩũơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/g) || []).length;
+  const jpChars = (stripped.match(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3400-\u4DBF]/g) || []).length;
+  // If more than 50% is Latin and very few Japanese chars, it's romaji
+  return latinChars > jpChars * 2 && latinChars > 5;
 }
 
 // ── Extract all Japanese text from exercises ──
@@ -1202,13 +1309,36 @@ function extractKanjiWords(text) {
 async function fetchFurigana(kanjiWords) {
   if (!kanjiWords || kanjiWords.length === 0) return [];
   const wordList = kanjiWords.join(', ');
-  const prompt = `Return the hiragana reading for each of the following kanji words. Return ONLY a JSON array (no markdown):\n[{"kanji":"word","reading":"hiragana"}]\n\nWords: ${wordList}\n\nRules: most common reading, include ALL words, no newlines inside JSON strings.`;
+  const prompt = `You are a Japanese linguistics expert. Provide the Hiragana (ひらがな) reading for each of the following kanji words.
+
+CRITICAL RULES:
+1. The "reading" MUST be in Hiragana only.
+2. Absolutely DO NOT use Romaji.
+3. Return ONLY a valid JSON array, nothing else.
+
+Format:
+[{"kanji":"word","reading":"ひらがな"}]
+
+Words to process:
+${wordList}`;
+
   try {
     const raw = await callGemini(prompt);
-    let c = raw.replace(/```json|```/g, '').trim().replace(/\n/g, ' ');
-    const m = c.match(/\[\s*\{[\s\S]*\}\s*\]/);
-    if (m) return JSON.parse(m[0]);
-  } catch (e) { console.warn('Furigana fetch failed:', e); }
+    let clean = raw.replace(/```json|```/g, '').trim().replace(/\n/g, ' ');
+
+    const start = clean.indexOf('[');
+    if (start === -1) throw new Error('No JSON array found for Furigana');
+    let depth = 0, end = -1;
+    for (let i = start; i < clean.length; i++) {
+      if (clean[i] === '[') depth++;
+      else if (clean[i] === ']') { depth--; if (depth === 0) { end = i; break; } }
+    }
+    if (end === -1) throw new Error('Incomplete JSON array for Furigana');
+
+    return JSON.parse(clean.substring(start, end + 1));
+  } catch (e) {
+    console.warn('Furigana fetch failed:', e);
+  }
   return [];
 }
 
@@ -1242,7 +1372,7 @@ async function ensureFurigana(exercises) {
   exercises.forEach(q => { q.furigana = fullList; });
 }
 
-// ── Generate exercises (supports up to 100 via batching) ──
+// ── Generate exercises (supports up to 100 via batching + retry) ──
 async function generatePractice() {
   const count = parseInt(document.getElementById('qCount').value);
   const btn = document.getElementById('genPracticeBtn');
@@ -1257,29 +1387,82 @@ async function generatePractice() {
   area.style.display = 'block';
   qList.innerHTML = Array(count).fill('<div class="q-skeleton"></div>').join('');
 
-  // Batch size: max 20 per API call to stay within token limits
-  const BATCH = 20;
-  const batches = [];
-  let remaining = count;
-  while (remaining > 0) { batches.push(Math.min(remaining, BATCH)); remaining -= BATCH; }
+  // Batch size: max 10 per API call for reliable JSON output
+  const BATCH = 10;
+  const MAX_RETRIES = 2; // retry per batch if AI returns fewer questions
 
   try {
     currentExercises = [];
-    for (let b = 0; b < batches.length; b++) {
-      btn.textContent = batches.length > 1 ? `⏳ Batch ${b + 1}/${batches.length}...` : '⏳ Đang tạo...';
-      const prompt = buildPracticePrompt(practiceLevel, practiceTypes, batches[b]);
-      const raw = await callGemini(prompt);
-      currentExercises.push(...parseExerciseJSON(raw));
-      renderExercises(currentExercises); // render progressively (no furigana yet)
+    let remaining = count;
+    let batchNum = 0;
+    const totalBatches = Math.ceil(count / BATCH);
+
+    while (remaining > 0) {
+      const batchSize = Math.min(remaining, BATCH);
+      batchNum++;
+      btn.textContent = totalBatches > 1 ? `⏳ Batch ${batchNum}/${totalBatches}...` : '⏳ Đang tạo...';
+
+      let batchQuestions = [];
+      let retries = 0;
+      let need = batchSize;
+
+      // Retry loop: keep requesting until we have enough questions for this batch
+      while (need > 0 && retries <= MAX_RETRIES) {
+        if (retries > 0) {
+          btn.textContent = `⏳ Batch ${batchNum} retry ${retries}... (còn thiếu ${need} câu)`;
+        }
+        try {
+          const prompt = buildPracticePrompt(practiceLevel, practiceTypes, need);
+          const raw = await callGemini(prompt);
+          const parsed = parseExerciseJSON(raw);
+          // Validate: only accept well-formed questions, reject romaji
+          const valid = parsed.filter(q => {
+            if (!q || (!q.question && !q.passage) || !q.options || q.options.length === 0) return false;
+            // Reject questions written in romaji instead of Japanese
+            if (isRomaji(q.question)) return false;
+            return true;
+          });
+          batchQuestions.push(...valid);
+          need = batchSize - batchQuestions.length;
+        } catch (parseErr) {
+          console.warn(`Batch ${batchNum} retry ${retries} parse error:`, parseErr);
+        }
+        retries++;
+      }
+
+      // Take exactly what we need (in case AI returned extra)
+      const toAdd = batchQuestions.slice(0, batchSize);
+      currentExercises.push(...toAdd);
+      remaining -= toAdd.length;
+
+      // If we still couldn't get enough after retries, break to avoid infinite loop
+      if (toAdd.length === 0) {
+        console.warn(`Batch ${batchNum}: could not generate any questions after retries`);
+        break;
+      }
+
+      renderExercises(currentExercises); // render progressively
     }
+
+    if (currentExercises.length === 0) {
+      throw new Error('AI không trả về câu hỏi nào hợp lệ');
+    }
+
     // Auto-fetch furigana for all kanji
     btn.textContent = '⏳ Đang thêm furigana...';
     await ensureFurigana(currentExercises);
     renderExercises(currentExercises); // re-render with furigana
-    showToast(`✓ Tạo ${currentExercises.length} câu hỏi thành công!`);
+
+    if (currentExercises.length < count) {
+      showToast(`⚠ Chỉ tạo được ${currentExercises.length}/${count} câu hỏi`, true);
+    } else {
+      showToast(`✓ Tạo ${currentExercises.length} câu hỏi thành công!`);
+    }
   } catch (e) {
     if (currentExercises.length === 0)
       qList.innerHTML = `<div class="q-feedback fb-wrong show">⚠ Lỗi: ${e.message}</div>`;
+    else
+      renderExercises(currentExercises); // show whatever we got
     showToast('Lỗi: ' + e.message, true);
   }
   btn.disabled = false;
@@ -1311,7 +1494,33 @@ const TYPE_LABELS = {
 function renderOneQuestion(q, i) {
   const [cssType, label] = TYPE_LABELS[q.type] || ['mcq', q.type];
   const hasOptions = q.options && q.options.length > 0;
-  const fg = q.furigana; // furigana list [{kanji, reading}, ...]
+  const fg = q.furigana;
+
+  // Auto-heal AI formatting if it forgot blanks/brackets
+  if (q.question) {
+    // 1. Force empty or purely whitespace brackets to become ( ___ )
+    q.question = q.question.replace(/（\s*）/g, '（ ___ ）').replace(/\(\s*\)/g, '（ ___ ）');
+
+    // 2. Check if the question lacks any highlighting or blank indicators
+    const hasBrackets = q.question.includes('【') || q.question.includes('___') || q.question.includes('＿');
+    if (!hasBrackets) {
+      if ((q.type === 'mondai1' || q.type === 'mondai2' || q.type === 'mondai4') && q.target) {
+        // Wrap target word in brackets
+        q.question = q.question.replace(q.target, `【${q.target}】`);
+      } else if ((q.type === 'mondai3' || q.type === 'mondai5') && q.answer) {
+        // Extract raw answer (e.g. "①だいたい" -> "だいたい")
+        const rawAns = q.answer.replace(/^[①②③④1234]\s*/, '').trim();
+        if (rawAns && q.question.includes(rawAns)) {
+          q.question = q.question.replace(rawAns, '（ ___ ）');
+        } else if (!q.question.includes('（ ___ ）')) {
+          // If all else fails, just append the blank at the end to satisfy visual check
+          q.question += ' （ ___ ）';
+        }
+      } else if (q.type === 'mondai6' && !q.question.includes('★')) {
+        q.question += ' ＿　＿　★　＿';
+      }
+    }
+  }
 
   let bodyHTML = '';
 
@@ -1877,10 +2086,104 @@ Chỉ in ra JSON, chữ không có nghĩa thì để mảng rỗng [] hoặc đi
 }
 
 const KANJI_LISTS = {
+  'hiragana': "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをんがぎぐげござじずぜぞだぢづでどばびぶべぼぱぴぷぺぽゃゅょっ",
+  'katakana': "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンガギグゲゴザジズゼゾダヂヅデドバビブベボパピプペポャュョッ",
   'N5': "一二三四五六七八九十百千万円人女子学生年月日時分半今午前後毎週曜間上下中左右東西南北外名何語文字本休校友父母兄姉弟妹夫妻家車電駅社会員仕事店銀行病院部屋室所国地図山川田天気雨雪風空海花草犬魚虫目耳口手足力心体食飲見聞話読書行来入出立休買安高小大新古長短白黒赤青",
   'N4': "不同町村市区道府県京寺神社公園場所近遠通道橋建物階段屋根庭海岸港湖島林森原岩石星光音声色茶黄緑暗明暑寒温冷熱重軽広狭太細強弱早遅多少悪良若古親切便利有名元気特別変簡単複雑危険安全必要以外以内以上以下首顔鼻歯毛背胸腹指皮血痛病医薬者死命泳走歩座起寝働使作持待思考知覚忘伝借貸習勉教問答返計算説調練試験題意味由理決定始終開閉集別選取捨止帰送配届呼泣笑怒喜悲驚困助願約束信注意用服着脱洗料理飯肉野菜果物牛豚鳥酒茶菓子塩砂糖朝昼夜夕方春夏秋冬去来昨明次回毎度番線発到着乗降転運旅泊客宿港空飛船荷列急普通特急席券現金代値料費税低両足都合当然結婚離婚愛恋夢希望",
   'N3': "与並主久乏乳乾乱亡争互井亜享亭介他付令仲件任企伺位低住佐例供依価便係保信修倉個倍候借値側停健偶備傾働優元兄兆党入全共具典兼内再冒写冠冷処凡凶出刀刃列初判別利到制刷券刺刻則削前割創劇力功加助努労効勢勤勝募勉動務包化北医区十千午卒協単博印危即卵去参及友双反収叔取受叩号司各合吉同名后向否含吸呼命和員哲商問営器囲固国圧在地坂均型埋城域基堂報場塔塗増士変夏夕外多夜夢大天太夫央失奏契奥女好妻委姿婦婚嫌子字存季学宅宇守安完官宙定実客宣室宮害家容宿寄密富寒察寸寺対寿封専射将尊導小少就尺局居属層山岸峰島崩州工左巧巨差巻市布希席帯帰常幅干平年幸幻幼庁床底店府度座庫庭康延建弁式弓引強当形役彼往待律後徒得御復微心必応快念怒怖思急性怪恋恐恒恥恵悩悪悲情惑想意感愛態慣慢慮成我戦戯戸戻所才打払扱承技投折抜抱抵押招担拍拝拒拓拳指持振捕捜掛探接控推支改政故救敗教散敬数整敵文料断新方施旅族旗日旧旨早易星映春昨昭昼晴景暑暗暴曲更替最月有服期木未末本札机材村条来杯東松果枝柔査柱柳株根格案桜梅械棒森植業極楽様横権欠次欧欲歌止正武歩歯歴死残段殺母毎毒比毛民気水永汁求汗汚池決沈沖沙没河油治沿況泉泊法波泣注泰洋洗活派流浅浜浮浪海消涙液涼深混清減測港湖湯湾満漁漢演潔激火灯灰災炎点為無然焼煙照熱燃爆父片版牙牛牧物特犬犯状独狭猫献玉王現球理生産用田由申男町画界畑留番異疑病痛登白的皇皮皿益盛盟目直相省看県真眼知短石砂研破確示礼社祖祝神票禁福科秒秋秘移程税種究空突窓立章童競竹笑笛第等筆答箱管節約紅純紙級細終組経結給統絵絶続緑線編締缶罪置罰美羊羽翌習老考者耳職肉肌肩背胃胸能脂脳腹腕腰臓臣自至興舌舎航船良色花芸芽若苦英茶草荷菜華落葉著蒸薬血行術街衣表裏製複西要見規視覚親観角解言計討訓記訪設許訳詞試話話認誘語誤説読課調談論講謝識警議譲谷豆豊貝負財責貯買貸費貿賀資賛質赤走起超越趣足距路跳身軍転軽較輪辞農辺近返追退送逃逆通速進遅遇遊運過道達違遠適選遺郵部都配酒酸里重野量金針鉄銀銭録鏡長門開閉間関防限院除険陽階際障隠隣隻雄雑離難雨雪雲零雷電青静非面革音順預頭題額顔願類風飛食飯飲館首馬駅験高髪鳥鳴麦黄黒"
 };
+
+function showDrawCharList(type) {
+  const list = KANJI_LISTS[type] || "";
+  const picker = document.getElementById("drawCharPicker");
+  
+  // Highlight active button
+  ['hira', 'kata', 'N5', 'N4', 'N3'].forEach(id => {
+    const btn = document.getElementById(`dcbtn-${id}`);
+    if (btn) btn.classList.remove('active');
+  });
+  
+  let btnId = '';
+  if (type === 'hiragana') btnId = 'hira';
+  else if (type === 'katakana') btnId = 'kata';
+  else btnId = type;
+  
+  const activeBtn = document.getElementById(`dcbtn-${btnId}`);
+  if (activeBtn) activeBtn.classList.add('active');
+
+  picker.innerHTML = "";
+  picker.style.display = "flex";
+  
+  const searchWrap = document.createElement("div");
+  searchWrap.style.marginBottom = "8px";
+  searchWrap.style.display = "flex";
+  searchWrap.style.background = "#fff";
+  searchWrap.style.padding = "10px 10px 0 10px";
+
+  const searchInp = document.createElement("input");
+  searchInp.type = "text";
+  searchInp.placeholder = `🔍 Tìm trong ${type}...`;
+  searchInp.style.flex = "1";
+  searchInp.style.padding = "6px 12px";
+  searchInp.style.border = "1px solid var(--br)";
+  searchInp.style.borderRadius = "6px";
+  searchInp.style.fontFamily = "inherit";
+  searchInp.style.fontSize = "14px";
+  searchInp.style.outline = "none";
+  searchWrap.appendChild(searchInp);
+
+  const filterWrap = document.createElement("div");
+  filterWrap.style.display = "flex";
+  filterWrap.style.flexWrap = "wrap";
+  filterWrap.style.gap = "6px";
+  filterWrap.style.overflowY = "auto";
+  filterWrap.style.padding = "10px";
+  filterWrap.style.flex = "1";
+  filterWrap.style.minHeight = "0";
+
+  picker.appendChild(searchWrap);
+  picker.appendChild(filterWrap);
+
+  const chars = Array.from(new Set(list.replace(/\s+/g, '').split('')));
+  const btnEls = [];
+
+  chars.forEach(ch => {
+    const btn = document.createElement("button");
+    btn.className = "btn-kanji";
+    btn.textContent = ch;
+
+    const name = getCharName(ch) || ch;
+    btn.title = name;
+
+    btn.onclick = () => {
+      setPractice(null, ch);
+      // Visual feedback
+      btn.style.transform = 'scale(0.9)';
+      setTimeout(() => btn.style.transform = 'none', 100);
+    };
+    filterWrap.appendChild(btn);
+    btnEls.push({ ch: ch, name: name.toLowerCase(), el: btn });
+  });
+
+  searchInp.addEventListener("input", (e) => {
+    const q = e.target.value.toLowerCase().trim();
+    btnEls.forEach(item => {
+      if (!q || item.ch.includes(q) || item.name.includes(q)) {
+        item.el.style.display = "inline-block";
+      } else {
+        item.el.style.display = "none";
+      }
+    });
+  });
+}
+
+function closeDrawCharList() {
+  document.getElementById("drawCharPicker").style.display = "none";
+  ['hira', 'kata', 'N5', 'N4', 'N3'].forEach(id => {
+    const btn = document.getElementById(`dcbtn-${id}`);
+    if (btn) btn.classList.remove('active');
+  });
+}
 
 function showKanjiList(level) {
   const list = KANJI_LISTS[level] || "";
@@ -1975,3 +2278,483 @@ function updateGenContextLabel() {
 }
 
 // buildPracticePrompt is defined above using JLPT_PROMPTS (Japanese format)
+
+// ═══════════════════════════════════
+// TTS (Text-to-Speech)
+// ═══════════════════════════════════
+let ttsVoice = null;
+
+function initTTS() {
+  const loadVoices = () => {
+    const voices = speechSynthesis.getVoices();
+    // Prefer high-quality Japanese voices
+    ttsVoice = voices.find(v => v.lang === 'ja-JP' && v.name.includes('Google'))
+      || voices.find(v => v.lang === 'ja-JP')
+      || voices.find(v => v.lang.startsWith('ja'))
+      || null;
+  };
+  loadVoices();
+  if (speechSynthesis.onvoiceschanged !== undefined) {
+    speechSynthesis.onvoiceschanged = loadVoices;
+  }
+}
+
+function speakJP(text, btnEl) {
+  if (!text || text === '—') return;
+  // Cancel any ongoing speech
+  speechSynthesis.cancel();
+
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = 'ja-JP';
+  utter.rate = 0.85;
+  utter.pitch = 1;
+  if (ttsVoice) utter.voice = ttsVoice;
+
+  // Visual feedback
+  if (btnEl) {
+    btnEl.classList.add('speaking');
+    utter.onend = () => btnEl.classList.remove('speaking');
+    utter.onerror = () => btnEl.classList.remove('speaking');
+  }
+
+  speechSynthesis.speak(utter);
+}
+
+// Init TTS on load
+document.addEventListener('DOMContentLoaded', initTTS);
+
+// ═══════════════════════════════════
+// SEARCH / FILTER FLASHCARDS
+// ═══════════════════════════════════
+function filterCards() {
+  searchQuery = document.getElementById('cardSearch').value.trim().toLowerCase();
+  renderCards();
+}
+
+function getFilteredCards() {
+  let result = cards.map((card, origIdx) => ({ card, origIdx }));
+
+  // Apply tag filter
+  if (activeFilter !== 'all') {
+    if (activeFilter === '_no_tag') {
+      result = result.filter(({ card }) => !card.tag);
+    } else {
+      result = result.filter(({ card }) => card.tag === activeFilter);
+    }
+  }
+
+  // Apply search query
+  if (searchQuery) {
+    result = result.filter(({ card }) => {
+      const q = searchQuery;
+      return (card.jp && card.jp.toLowerCase().includes(q))
+        || (card.rom && card.rom.toLowerCase().includes(q))
+        || (card.mean && card.mean.toLowerCase().includes(q))
+        || (card.tag && card.tag.toLowerCase().includes(q));
+    });
+  }
+
+  return result;
+}
+
+function buildFilterPills() {
+  const container = document.getElementById('filterPills');
+  if (!container) return;
+
+  // Collect tags with counts
+  const tagCounts = {};
+  cards.forEach(c => {
+    const t = c.tag || '_no_tag';
+    tagCounts[t] = (tagCounts[t] || 0) + 1;
+  });
+
+  // Build pills: All, then specific tags
+  let html = `<button class="filter-pill${activeFilter === 'all' ? ' active' : ''}" onclick="setFilter('all')">Tất cả <span class="fp-count">${cards.length}</span></button>`;
+
+  // Sort tags: N5, N4, N3 first, then rest alphabetically
+  const priority = ['N5', 'N4', 'N3', 'N2', 'N1'];
+  const sortedTags = Object.keys(tagCounts).filter(t => t !== '_no_tag').sort((a, b) => {
+    const ai = priority.indexOf(a), bi = priority.indexOf(b);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return a.localeCompare(b);
+  });
+
+  sortedTags.forEach(tag => {
+    html += `<button class="filter-pill${activeFilter === tag ? ' active' : ''}" onclick="setFilter('${tag}')">${tag} <span class="fp-count">${tagCounts[tag]}</span></button>`;
+  });
+
+  // "No tag" pill if exists
+  if (tagCounts['_no_tag']) {
+    html += `<button class="filter-pill${activeFilter === '_no_tag' ? ' active' : ''}" onclick="setFilter('_no_tag')">— <span class="fp-count">${tagCounts['_no_tag']}</span></button>`;
+  }
+
+  container.innerHTML = html;
+}
+
+function setFilter(tag) {
+  activeFilter = tag;
+  renderCards();
+}
+
+// ═══════════════════════════════════
+// SRS (Spaced Repetition System) — SM-2
+// ═══════════════════════════════════
+
+function getSRSKey() {
+  return currentUser ? `nh_srs_${currentUser.id}` : 'nh_srs_guest';
+}
+
+function loadSRSData() {
+  try {
+    const raw = localStorage.getItem(getSRSKey());
+    srsData = raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    srsData = {};
+  }
+}
+
+function saveSRSData() {
+  localStorage.setItem(getSRSKey(), JSON.stringify(srsData));
+}
+
+function getSRSData(cardId) {
+  if (!cardId) return null;
+  return srsData[cardId] || null;
+}
+
+function getSRSStage(srs) {
+  if (!srs) return 'srs-new';
+  if (srs.interval <= 0) return 'srs-learning';
+  if (srs.interval < 21) return 'srs-review';
+  return 'srs-mature';
+}
+
+function isDue(srs) {
+  if (!srs) return true; // New card → due
+  if (!srs.nextReview) return true;
+  return Date.now() >= srs.nextReview;
+}
+
+function getDueCards() {
+  return cards.filter(c => {
+    const cid = c.id || c.jp;
+    const srs = getSRSData(cid);
+    return isDue(srs);
+  });
+}
+
+// SM-2 Algorithm Implementation
+// quality: 0=Again, 1=Hard, 2=Good, 3=Easy
+function calculateSRS(srs, quality) {
+  const now = Date.now();
+  let { ease, interval, repetitions } = srs || { ease: 2.5, interval: 0, repetitions: 0 };
+
+  // SM-2 quality mapping: 0=Again(0), 1=Hard(2), 2=Good(3), 3=Easy(5)
+  const q = [0, 2, 3, 5][quality];
+
+  if (q < 3) {
+    // Failed — reset
+    repetitions = 0;
+    interval = quality === 1 ? Math.max(1, Math.round(interval * 0.5)) : 0; // Hard gets half interval
+  } else {
+    repetitions++;
+    if (repetitions === 1) {
+      interval = 1; // 1 day
+    } else if (repetitions === 2) {
+      interval = quality === 3 ? 4 : 3; // Easy gets 4 days
+    } else {
+      interval = Math.round(interval * ease);
+      if (quality === 3) interval = Math.round(interval * 1.3); // Easy bonus
+    }
+  }
+
+  // Update ease factor
+  ease = Math.max(1.3, ease + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02)));
+
+  const nextReview = now + interval * 24 * 60 * 60 * 1000;
+
+  return {
+    ease: Math.round(ease * 100) / 100,
+    interval,
+    repetitions,
+    nextReview,
+    lastReview: now
+  };
+}
+
+function previewIntervals(cardId) {
+  const srs = getSRSData(cardId) || { ease: 2.5, interval: 0, repetitions: 0 };
+  return [0, 1, 2, 3].map(q => calculateSRS({ ...srs }, q).interval);
+}
+
+function formatInterval(days) {
+  if (days <= 0) return '< 1p';
+  if (days < 1) return `${Math.round(days * 24)}h`;
+  if (days === 1) return '1 ngày';
+  if (days < 30) return `${days} ngày`;
+  if (days < 365) return `${Math.round(days / 30)} tháng`;
+  return `${(days / 365).toFixed(1)} năm`;
+}
+
+function showSRSButtons(card) {
+  const cid = card?.id || card?.jp;
+  if (!card || !cid) return;
+  const intervals = previewIntervals(cid);
+  document.getElementById('srsInt0').textContent = formatInterval(intervals[0]);
+  document.getElementById('srsInt1').textContent = formatInterval(intervals[1]);
+  document.getElementById('srsInt2').textContent = formatInterval(intervals[2]);
+  document.getElementById('srsInt3').textContent = formatInterval(intervals[3]);
+  document.getElementById('srsButtons').style.display = 'flex';
+}
+
+function rateSRS(quality) {
+  const c = cards[studyOrder[studyIdx]];
+  const cid = c?.id || c?.jp;
+  if (!c || !cid) return;
+
+  const oldSRS = getSRSData(cid) || { ease: 2.5, interval: 0, repetitions: 0 };
+  const newSRS = calculateSRS(oldSRS, quality);
+  srsData[cid] = newSRS;
+  saveSRSData();
+
+  const labels = ['Quên', 'Khó', 'Ổn', 'Dễ'];
+  showToast(`${labels[quality]} → ôn lại: ${formatInterval(newSRS.interval)}`);
+
+  // Auto-advance to next card
+  document.getElementById('srsButtons').style.display = 'none';
+  updateSRSStats();
+  updateSRSDueBadge();
+
+  // If in SRS review mode, remove this card from study order if no longer due
+  if (!isDue(newSRS)) {
+    studyOrder = studyOrder.filter(idx => idx !== studyOrder[studyIdx]);
+    if (studyOrder.length === 0) {
+      showToast('🎉 Đã ôn xong tất cả thẻ hôm nay!');
+      toggleStudy();
+      return;
+    }
+    if (studyIdx >= studyOrder.length) studyIdx = 0;
+  } else {
+    studyIdx = (studyIdx + 1) % studyOrder.length;
+  }
+
+  updateStudyCard();
+}
+
+function updateSRSStats() {
+  loadSRSData();
+  let newCount = 0, learningCount = 0, reviewCount = 0, masteredCount = 0;
+
+  cards.forEach(c => {
+    const cid = c.id || c.jp;
+    const srs = getSRSData(cid);
+    const stage = getSRSStage(srs);
+    if (stage === 'srs-new') newCount++;
+    else if (stage === 'srs-learning') learningCount++;
+    else if (stage === 'srs-review') reviewCount++;
+    else if (stage === 'srs-mature') masteredCount++;
+  });
+
+  const el = (id) => document.getElementById(id);
+  if (el('srsNew')) el('srsNew').textContent = newCount;
+  if (el('srsLearning')) el('srsLearning').textContent = learningCount;
+  if (el('srsReview')) el('srsReview').textContent = reviewCount;
+  if (el('srsMastered')) el('srsMastered').textContent = masteredCount;
+
+  updateSRSDueBadge();
+}
+
+function updateSRSDueBadge() {
+  const badge = document.getElementById('srsDueBadge');
+  if (!badge) return;
+  const dueCount = getDueCards().length;
+  if (dueCount > 0) {
+    badge.className = 'srs-due-badge has-due';
+    badge.innerHTML = `🔔 ${dueCount} thẻ cần ôn`;
+  } else {
+    badge.className = 'srs-due-badge no-due';
+    badge.innerHTML = '✅ Đã ôn xong';
+  }
+}
+
+function startSRSReview() {
+  const due = getDueCards();
+  if (due.length === 0) {
+    showToast('✅ Không có thẻ nào cần ôn!');
+    return;
+  }
+
+  // Build study order from due cards only, sorted by urgency (oldest first)
+  studyOrder = due.map(c => cards.indexOf(c)).filter(i => i !== -1);
+  studyOrder.sort((a, b) => {
+    const cidA = cards[a]?.id || cards[a]?.jp;
+    const cidB = cards[b]?.id || cards[b]?.jp;
+    const srsA = getSRSData(cidA);
+    const srsB = getSRSData(cidB);
+    const nextA = srsA?.nextReview || 0;
+    const nextB = srsB?.nextReview || 0;
+    return nextA - nextB;
+  });
+
+  studyIdx = 0;
+  studyOn = true;
+  document.getElementById('studyWrap').style.display = 'block';
+  document.getElementById('studyBtn').textContent = '✕ Thoát Study';
+  updateStudyCard();
+  showToast(`📚 Bắt đầu ôn ${due.length} thẻ SRS`);
+}
+
+// ═══════════════════════════════════
+// HỌC THEO GIÁO TRÌNH (COURSE STUDY)
+// ═══════════════════════════════════
+let courseCards = [];
+let courseIdx = 0;
+let courseShuffled = false;
+let courseOrder = [];  // indices into courseCards for shuffle support
+
+function showCourseLessons(level) {
+  const picker = document.getElementById('coursePicker');
+  picker.innerHTML = '';
+  picker.style.display = 'flex';
+  
+  if (!COURSE_DATA || !COURSE_DATA[level]) {
+    picker.innerHTML = `<span style="color:var(--faint);">Chưa có dữ liệu cho ${level}...</span>`;
+    return;
+  }
+  
+  const lessons = Object.keys(COURSE_DATA[level]);
+  lessons.forEach(lsn => {
+    const count = COURSE_DATA[level][lsn].length;
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-sm btn-ghost';
+    btn.innerHTML = `${lsn} <span style="font-size:10px;color:var(--faint);">(${count})</span>`;
+    btn.style.border = '1px solid var(--br)';
+    btn.onclick = () => loadCourseStudy(level, lsn);
+    picker.appendChild(btn);
+  });
+}
+
+function loadCourseStudy(level, lesson) {
+  const data = COURSE_DATA[level][lesson];
+  if (!data || data.length === 0) return;
+  
+  courseCards = data;
+  courseIdx = 0;
+  courseShuffled = false;
+  courseOrder = courseCards.map((_, i) => i);
+  
+  document.getElementById('courseStudyWrap').style.display = 'block';
+  document.getElementById('courseStudyLbl').textContent = `${level} - ${lesson} (${data.length} từ)`;
+  updateCourseCard();
+  
+  // Update shuffle button state
+  const shuffleBtn = document.getElementById('courseShuffleBtn');
+  if (shuffleBtn) shuffleBtn.textContent = '🔀 Trộn';
+  
+  // Scroll into view
+  document.getElementById('courseStudyWrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeCourseStudy() {
+  document.getElementById('courseStudyWrap').style.display = 'none';
+  courseCards = [];
+  courseOrder = [];
+}
+
+function updateCourseCard() {
+  if (!courseCards.length) return;
+  const realIdx = courseOrder[courseIdx];
+  const c = courseCards[realIdx];
+  document.getElementById('csJP').textContent = c.jp;
+  document.getElementById('csKana').textContent = c.kana || '';
+  document.getElementById('csRom').textContent = c.rom || '';
+  document.getElementById('csMean').textContent = c.mean;
+  
+  // Always reset to hidden state when navigating
+  document.getElementById('courseCardEl').classList.remove('revealed');
+  
+  document.getElementById('cProgFill').style.width = Math.round((courseIdx + 1) / courseCards.length * 100) + '%';
+  document.getElementById('courseCtr').textContent = `${courseIdx + 1} / ${courseCards.length}`;
+}
+
+function revealCourseCard() {
+  const el = document.getElementById('courseCardEl');
+  if (!el.classList.contains('revealed')) {
+    el.classList.add('revealed');
+    // Auto-speak when revealing
+    const jpText = document.getElementById('csJP').textContent;
+    if (jpText && jpText !== '—') speakJP(jpText);
+  }
+}
+
+function nextCourseCard() {
+  if (!courseCards.length) return;
+  courseIdx = (courseIdx + 1) % courseCards.length;
+  updateCourseCard();
+}
+
+function prevCourseCard() {
+  if (!courseCards.length) return;
+  courseIdx = (courseIdx - 1 + courseCards.length) % courseCards.length;
+  updateCourseCard();
+}
+
+function shuffleCourseCards() {
+  if (!courseCards.length) return;
+  courseShuffled = !courseShuffled;
+  
+  if (courseShuffled) {
+    // Fisher-Yates shuffle
+    courseOrder = courseCards.map((_, i) => i);
+    for (let i = courseOrder.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [courseOrder[i], courseOrder[j]] = [courseOrder[j], courseOrder[i]];
+    }
+    showToast('🔀 Đã trộn thứ tự');
+  } else {
+    courseOrder = courseCards.map((_, i) => i);
+    showToast('📖 Theo thứ tự gốc');
+  }
+  
+  const shuffleBtn = document.getElementById('courseShuffleBtn');
+  if (shuffleBtn) {
+    shuffleBtn.textContent = courseShuffled ? '📖 Gốc' : '🔀 Trộn';
+  }
+  
+  courseIdx = 0;
+  updateCourseCard();
+}
+
+// Keyboard shortcuts for course study
+document.addEventListener('keydown', (e) => {
+  // Only active when course study is visible
+  const wrap = document.getElementById('courseStudyWrap');
+  if (!wrap || wrap.style.display === 'none' || !courseCards.length) return;
+  
+  // Don't intercept if user is typing in an input/textarea
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  
+  if (e.key === ' ' || e.key === 'Enter') {
+    e.preventDefault();
+    const el = document.getElementById('courseCardEl');
+    if (el.classList.contains('revealed')) {
+      nextCourseCard();
+    } else {
+      revealCourseCard();
+    }
+  } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    nextCourseCard();
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    prevCourseCard();
+  }
+});
+
+const _origUpdateAuthUI = updateAuthUI;
+updateAuthUI = function() {
+  _origUpdateAuthUI();
+  loadSRSData();
+};
